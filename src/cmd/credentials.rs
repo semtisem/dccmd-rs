@@ -29,23 +29,3 @@ pub fn delete_dracoon_env(entry: &Entry, dracoon_url: &str) -> Result<(), DcCmdE
         Err(_) => Err(DcCmdError::CredentialDeletionFailed),
     }
 }
-
-#[allow(clippy::module_name_repetitions)]
-pub fn get_client_credentials() -> (String, String) {
-    let client_id = include_str!("../../.env")
-        .split('\n')
-        .next()
-        .expect("env file has more than one line")
-        .split("CLIENT_ID=")
-        .nth(1)
-        .expect("CLIENT_ID MUST be provided");
-    let client_secret = include_str!("../../.env")
-        .split('\n')
-        .nth(1)
-        .expect("env file has more than one line")
-        .split("CLIENT_SECRET=")
-        .nth(1)
-        .expect("CLIENT_SECRET MUST be provided");
-
-    (client_id.into(), client_secret.into())
-}

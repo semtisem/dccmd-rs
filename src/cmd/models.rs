@@ -1,4 +1,5 @@
 use clap::Parser;
+use serde::Deserialize;
 use thiserror::Error;
 
 use dco3::{
@@ -199,4 +200,19 @@ pub enum PrintFormat {
     Csv,
 }
 
+#[derive(Deserialize, Debug, Clone)]
+pub struct DCCMDConfig {
+    pub credentials: Credentials,
+}
 
+impl DCCMDConfig {
+    pub fn credentials(&self) -> Credentials {
+        self.credentials.clone()
+    }
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Credentials {
+    pub client_id: String,
+    pub client_secret: String,
+}

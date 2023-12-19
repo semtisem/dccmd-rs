@@ -39,4 +39,7 @@ dotenv = "0.15.0"
 
 # credentials
 keyring = "2.0.5"
+config = "0.13.4"
+serde = { version = "1.0.193", features = ["derive"] }
+lazy_static = "1.4.0"
 

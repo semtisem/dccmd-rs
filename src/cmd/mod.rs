@@ -1,12 +1,12 @@
+use crate::cmd::credentials::delete_dracoon_env;
+use config::{Config, File, FileFormat};
 use console::Term;
 use keyring::Entry;
 use tracing::error;
 
-use crate::cmd::credentials::{delete_dracoon_env, get_client_credentials};
-
 use self::{
     credentials::{get_dracoon_env, set_dracoon_env},
-    models::{DcCmdError, PasswordAuth},
+    models::{DCCMDConfig, DcCmdError, PasswordAuth},
     utils::strings::format_error_message,
 };
 use dco3::{
@@ -22,12 +22,14 @@ pub mod utils;
 // service name to store
 const SERVICE_NAME: &str = env!("CARGO_PKG_NAME");
 
+// config file name
+const CONFIG_FILE_NAME: &str = "config.yml";
+
 /// initializes a dracoon client with encryption enabled (plain keypair ready to use)
 async fn init_encryption(
     dracoon: Dracoon<Connected>,
     encryption_password: Option<String>,
 ) -> Result<Dracoon<Connected>, DcCmdError> {
-
     let account = format!("{}-crypto", dracoon.get_base_url());
 
     let entry = Entry::new(SERVICE_NAME, &account).map_err(|_| DcCmdError::CredentialStorageFailed);
@@ -63,25 +65,26 @@ async fn init_encryption(
 
     // If necessary, create a new entry to store the secret
     if store {
-        let entry = Entry::new(SERVICE_NAME, &account).map_err(|_| DcCmdError::CredentialStorageFailed)?;
+        let entry =
+            Entry::new(SERVICE_NAME, &account).map_err(|_| DcCmdError::CredentialStorageFailed)?;
         set_dracoon_env(&entry, &secret)?;
     }
 
     Ok(dracoon)
-
 }
 
 async fn init_dracoon(
     url_path: &str,
     password_auth: Option<PasswordAuth>,
 ) -> Result<Dracoon<Connected>, DcCmdError> {
-    let (client_id, client_secret) = get_client_credentials();
+    let config = load_config();
+
     let base_url = parse_base_url(url_path.to_string())?;
 
     let dracoon = DracoonBuilder::new()
         .with_base_url(base_url.clone())
-        .with_client_id(client_id)
-        .with_client_secret(client_secret)
+        .with_client_id(config.credentials().client_id)
+        .with_client_secret(config.credentials().client_secret)
         .build()?;
 
     let entry =
@@ -199,6 +202,17 @@ fn get_error_message(err: &DcCmdError) -> String {
     }
 }
 
+fn load_config() -> DCCMDConfig {
+    let config_file = include_str!("../../config.yml");
+
+    Config::builder()
+        .add_source(File::from_str(config_file, FileFormat::Yaml).required(true))
+        .build()
+        .expect("Failed to build config")
+        .try_deserialize::<DCCMDConfig>()
+        .expect("Failed to deserialize config")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,6 +235,16 @@ mod tests {
         assert_eq!(
             base_url,
             Err(DcCmdError::InvalidUrl("https://bla.dracoon.com".into()))
+        );
+    }
+
+    #[test]
+    fn test_load_config() {
+        let config = load_config();
+        assert_eq!(config.credentials().client_id, "dccmd_rs_unbekanntes-pferd");
+        assert_eq!(
+            config.credentials().client_secret,
+            "LspjGm1S3EGgyC4NhtQcvGHzjzMOAv5b"
         );
     }
 }
