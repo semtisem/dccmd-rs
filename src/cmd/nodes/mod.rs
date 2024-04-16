@@ -15,7 +15,7 @@ use dco3::{
     auth::Connected,
     models::ListAllParams,
     nodes::{
-        models::{CreateFolderRequest, NodeList, NodeType}, rooms::models::CreateRoomRequest, Folders, GroupMemberAcceptance, Node, Nodes, RoomGroupsAddBatchRequestItem, RoomUsersAddBatchRequest, RoomUsersAddBatchRequestItem, Rooms
+        models::{CreateFolderRequest, NodeList, NodeType}, rooms::models::CreateRoomRequest, Folders, Node, Nodes, RoomGroupsAddBatchRequestItem, RoomUsersAddBatchRequestItem, Rooms
     },
     Dracoon,
 };
@@ -31,7 +31,6 @@ pub mod download;
 pub mod models;
 mod share;
 pub mod upload;
-pub mod models;
 
 #[allow(clippy::too_many_arguments, clippy::module_name_repetitions)]
 pub async fn list_nodes(
@@ -379,6 +378,7 @@ pub async fn create_room_structure(
     let path = parent_path.clone() + &node_name;
 
     let parent_node = dracoon
+        .nodes
         .get_node_from_path(&path)
         .await?
         .ok_or(DcCmdError::InvalidPath(source.clone()))?;
@@ -440,7 +440,7 @@ async fn create_rooms_and_subrooms(
 
 
 
-        let created_room: Node = dracoon.create_room(req).await?;
+        let created_room: Node = dracoon.nodes.create_room(req).await?;
 
         info!("Creatied room: {} at path: {}", room.name, path);
         term.write_line(&std::format!("Created room: {} at path: {}/", room.name, path))
@@ -452,7 +452,7 @@ async fn create_rooms_and_subrooms(
                 let user_update = RoomUsersAddBatchRequestItem::new(user_permission.id, user_permission.permissions);
                 user_updates.push(user_update);
             } 
-            dracoon.update_room_users(created_room.id, user_updates.into()).await?;
+            dracoon.nodes.update_room_users(created_room.id, user_updates.into()).await?;
         }
 
         if let Some(group_permissions) = room.group_permissions {
@@ -461,7 +461,7 @@ async fn create_rooms_and_subrooms(
                 let group_update = RoomGroupsAddBatchRequestItem::new(group_permission.id, group_permission.permissions, group_permission.new_group_member_acceptance);
                 group_updates.push(group_update);
             }
-            dracoon.update_room_groups(created_room.id, group_updates.into()).await?;
+            dracoon.nodes.update_room_groups(created_room.id, group_updates.into()).await?;
         }
 
         info!("Subrooms: {:?}", room.sub_rooms);
