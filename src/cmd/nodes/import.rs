@@ -1,14 +1,12 @@
 use async_recursion::async_recursion;
 use console::Term;
-use tracing::info;
+use tracing::{error, info};
 
 
 use dco3::{
-    auth::Connected,
-    nodes::{
-        models::NodeType, rooms::models::CreateRoomRequest, Node, Nodes, RoomGroupsAddBatchRequestItem, RoomUsersAddBatchRequestItem, Rooms
-    },
-    Dracoon,
+    auth::Connected, nodes::{
+        models::NodeType, rooms::models::CreateRoomRequest, GroupMemberAcceptance, Node, Nodes, RoomGroupsAddBatchRequestItem, RoomUsersAddBatchRequestItem, Rooms
+    }, Dracoon, ListAllParams
 };
 
 use super::models::RoomImport;
@@ -36,13 +34,15 @@ pub async fn create_room_structure(
         .nodes
         .get_node_from_path(&path)
         .await?
-        .ok_or(DcCmdError::InvalidPath(source.clone()))?;
+        .ok_or(DcCmdError::InvalidPathOrNoPermission(source.clone()))?;
 
     if parent_node.node_type != NodeType::Room {
         return Err(DcCmdError::InvalidPath(source.clone()));
     }
+    
+    check_user_permissions(&dracoon, &term, &parent_node, &path).await?;
 
-    info!("Creating room structure in room: {}", parent_node.id);
+    info!("Creating room structure at path: {}/", &path);
     term.write_line(&std::format!("Creating room structure at path: {}/", &path))
         .expect("Error writing message to terminal.");
 
@@ -50,6 +50,40 @@ pub async fn create_room_structure(
 
     
 
+}
+
+async fn check_user_permissions(dracoon: &Dracoon<Connected>, term: &Term, parent_node: &Node, path: &String) -> Result<(), DcCmdError> {
+    info!("Checking permission of script user in room: {}", &path);
+    term.write_line(&std::format!("Checking permission of script user in room: {}", &path))
+        .expect("Error writing message to terminal.");
+
+    let user_res = dracoon.nodes.get_room_users(parent_node.id, None).await?;
+    let mut user_list = user_res.items;
+    if user_res.range.total > 500 {
+        let mut offset = 500;
+
+        while offset < user_res.range.total {
+            let params_with_offset = ListAllParams::builder()
+                .with_offset(offset)
+                .build();
+
+            let user_res_offset = dracoon.nodes.get_room_users(parent_node.id, Some(params_with_offset)).await?;
+            user_list.extend(user_res_offset.items);
+            offset += 500;
+        }
+    }
+
+    let current_user = dracoon.get_user_info().await?;
+
+    // todo fix i64 type in userinfo (dco3)
+    if !user_list.iter().any(|user| u64::try_from(user.user_info.id).unwrap() == current_user.id && user.permissions.clone().unwrap().manage) {
+        error!("Script user does not have permission to create rooms in: {}", &path);
+        term.write_line(&std::format!("Script user does not have permission to create rooms in: {}", &path))
+            .expect("Error writing message to terminal.");
+        return Err(DcCmdError::InsufficentPermissions(path.clone())); // todo change error type
+    }
+
+    Ok(())
 }
 
 #[async_recursion]
@@ -61,39 +95,16 @@ async fn create_rooms_and_subrooms(
     path: String
 ) -> Result<(), DcCmdError> {
     for room in room_struct {
-        let mut req = CreateRoomRequest::builder(&room.name)
+        let req = CreateRoomRequest::builder(&room.name)
             .with_parent_id(parent_id)
-            .with_classification(room.classification.unwrap_or(2));
-
-        if let Some(inherit_permissions) = room.inherit_permissions {
-            req = req.with_inherit_permissions(inherit_permissions);
-        };
-        
-        if let Some(quota) = room.quota {
-            req = req.with_quota(quota);
-        };
-
-        if let Some(recycle_bin_retention_period) = room.recycle_bin_retention_period {
-            req = req.with_recycle_bin_retention_period(recycle_bin_retention_period);
-        };
-
-        if let Some(admin_ids) = room.admin_ids {
-            // todo if admin id is set and different from the current user, add the admin id
-            // save the the room id where the script user needs to remove itself as admin
-            req = req.with_admin_ids(admin_ids);
-        };
-
-        if let Some(admin_group_ids) = room.admin_group_ids {
-            req = req.with_admin_group_ids(admin_group_ids);
-        };
-
-        if let Some(new_group_member_acceptance) = room.new_group_member_acceptance {
-            req = req.with_new_group_member_acceptance(new_group_member_acceptance);
-        };
-
-        let req = req.build();
-
-
+            .with_classification(room.classification.unwrap_or(2))
+            .with_inherit_permissions(room.inherit_permissions.unwrap_or(false))
+            .with_quota(room.quota.unwrap_or(0))
+            .with_recycle_bin_retention_period(room.recycle_bin_retention_period.unwrap_or(0))
+            .with_admin_ids(room.admin_ids.unwrap_or(vec![]))
+            .with_admin_group_ids(room.admin_group_ids.unwrap_or(vec![]))
+            .with_new_group_member_acceptance(room.new_group_member_acceptance.unwrap_or(GroupMemberAcceptance::AutoAllow))
+            .build();
 
         let created_room: Node = dracoon.nodes.create_room(req).await?;
 

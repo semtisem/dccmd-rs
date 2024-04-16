@@ -196,6 +196,7 @@ fn get_error_message(err: &DcCmdError) -> String {
     match err {
         DcCmdError::InvalidUrl(url) => format!("Invalid URL: {url}"),
         DcCmdError::InvalidPath(path) => format!("Invalid path: {path}"),
+        DcCmdError::InvalidPathOrNoPermission(path) => format!("Invalid path or no permission at: {path}"),
         DcCmdError::IoError => "Error reading / writing content.".into(),
         DcCmdError::DracoonError(e) => format!("{e}"),
         DcCmdError::ConnectionFailed => "Connection failed.".into(),
@@ -207,6 +208,7 @@ fn get_error_message(err: &DcCmdError) -> String {
         DcCmdError::DracoonAuthError(e) => format!("{e}"),
         DcCmdError::InvalidArgument(msg) => msg.to_string(),
         DcCmdError::LogFileCreationFailed => "Log file creation failed.".into(),
+        DcCmdError::InsufficentPermissions(path) =>format!("Insufficent permissions to perform action at path: {path}")
     }
 }
 

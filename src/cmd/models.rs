@@ -22,6 +22,8 @@ pub enum DcCmdError {
     InvalidUrl(String),
     #[error("Invalid DRACOON path")]
     InvalidPath(String),
+    #[error("Invalid DRACOON path or no permission")]
+    InvalidPathOrNoPermission(String),
     #[error("Saving DRACOON credentials failed")]
     CredentialStorageFailed,
     #[error("Deleting DRACOON credentials failed")]
@@ -40,6 +42,8 @@ pub enum DcCmdError {
     InvalidArgument(String),
     #[error("Log file creation failed")]
     LogFileCreationFailed,
+    #[error("Insufficent permission to perform action")]
+    InsufficentPermissions(String),
 }
 
 impl From<DracoonClientError> for DcCmdError {
