@@ -181,6 +181,8 @@ pub enum DcCmdCommand {
         /// classification of the node (1-4)
         #[clap(long)]
         classification: Option<u8>,
+
+        path: Option<String>,
     },
 
     /// Delete a node in DRACOON

@@ -6,7 +6,7 @@ use cmd::{
     handle_error,
     models::{DcCmd, DcCmdCommand, PasswordAuth},
     nodes::{
-        create_folder, create_room, delete_node, download::download, list_nodes, upload::upload,
+        create_folder, create_room, create_room_structure, delete_node, download::download, list_nodes, upload::upload,
     },
 };
 use console::Term;
@@ -139,7 +139,13 @@ async fn main() {
         DcCmdCommand::Mkroom {
             source,
             classification,
-        } => create_room(term, source, classification, password_auth).await,
+            path
+        } => match path {
+            Some(path) => create_room_structure(term, source, classification, path, password_auth).await,
+            None => create_room(term, source, classification, password_auth).await
+        },
+        
+
         DcCmdCommand::Rm { source, recursive } => {
             delete_node(term, source, Some(recursive), password_auth).await
         },
