@@ -68,7 +68,7 @@ pub struct UserRoomPermission {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)] // This will make the compiler error if there are unknown fields in the JSON which could be typos and thus result in None values
-pub struct Room {
+pub struct RoomImport {
     pub name: String,
     pub recycle_bin_retention_period: Option<u32>,
     pub quota: Option<u64>,
@@ -79,19 +79,17 @@ pub struct Room {
     pub group_permissions: Option<Vec<GroupRoomPermission>>,
     pub new_group_member_acceptance: Option<GroupMemberAcceptance>,
     pub classification: Option<u8>,
-    pub sub_rooms: Option<Vec<Room>>,
+    pub sub_rooms: Option<Vec<RoomImport>>,
 }
 
-
-
-impl Room {
+impl RoomImport {
     pub fn from_path(path: String,) -> Result<Vec<Self>, DcCmdError> {
         let data = std::fs::read_to_string(&path).map_err(|e| {
             error!("Failed to read file: {}", e);
             DcCmdError::IoError
         })?;
     
-        let room_struct: Vec<Room> = serde_json::from_str(&data)
+        let room_struct: Vec<RoomImport> = serde_json::from_str(&data)
             .expect("JSON does not have correct format.");
         Ok(room_struct)
     }

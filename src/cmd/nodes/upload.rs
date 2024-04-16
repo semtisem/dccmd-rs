@@ -764,6 +764,6 @@ mod tests {
     async fn test_list_files() {
         let root_path = PathBuf::from("./src/cmd/nodes");
         let files = list_files(root_path).await.unwrap();
-        assert_eq!(files.len(), 5);
+        assert_eq!(files.len(), 6);
     }
 }

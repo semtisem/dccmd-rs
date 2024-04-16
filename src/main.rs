@@ -6,8 +6,7 @@ use cmd::{
     handle_error,
     models::{DcCmd, DcCmdCommand, PasswordAuth},
     nodes::{
-        create_folder, create_room, create_room_structure, delete_node, download::download, list_nodes,
-        models::UploadOptions, upload::upload,
+        create_folder, create_room, delete_node, download::download, import::create_room_structure, list_nodes, models::UploadOptions, upload::upload
     },
     users::handle_users_cmd,
 };
