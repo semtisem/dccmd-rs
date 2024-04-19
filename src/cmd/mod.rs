@@ -208,7 +208,8 @@ fn get_error_message(err: &DcCmdError) -> String {
         DcCmdError::DracoonAuthError(e) => format!("{e}"),
         DcCmdError::InvalidArgument(msg) => msg.to_string(),
         DcCmdError::LogFileCreationFailed => "Log file creation failed.".into(),
-        DcCmdError::InsufficentPermissions(path) =>format!("Insufficent permissions to perform action at path: {path}")
+        DcCmdError::InsufficentPermissions(path) =>format!("Insufficent permissions to perform action at path: {path}"),
+        DcCmdError::ImportedRoomHasNoAdmin(msg) => msg.to_string(),
     }
 }
 

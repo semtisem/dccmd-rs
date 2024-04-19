@@ -66,6 +66,13 @@ pub struct UserRoomPermission {
     pub permissions: NodePermissions,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomPolicies {
+    pub default_expiration_period: Option<u64>,
+    pub is_virus_protection_enabled: Option<bool>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)] // This will make the compiler error if there are unknown fields in the JSON which could be typos and thus result in None values
 pub struct RoomImport {
@@ -79,8 +86,13 @@ pub struct RoomImport {
     pub group_permissions: Option<Vec<GroupRoomPermission>>,
     pub new_group_member_acceptance: Option<GroupMemberAcceptance>,
     pub classification: Option<u8>,
+    pub policies: Option<RoomPolicies>,
     pub sub_rooms: Option<Vec<RoomImport>>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RoomId(pub u64);
+
 
 impl RoomImport {
     pub fn from_path(path: String,) -> Result<Vec<Self>, DcCmdError> {
@@ -91,7 +103,32 @@ impl RoomImport {
     
         let room_struct: Vec<RoomImport> = serde_json::from_str(&data)
             .expect("JSON does not have correct format.");
+
+        for room in &room_struct {
+            room.check_all_rooms_have_admin()?;
+        }
+
         Ok(room_struct)
+    }
+
+    fn check_all_rooms_have_admin(&self) -> Result<(), DcCmdError> {
+        let has_admin = self.admin_ids.is_some() && !self.admin_ids.as_ref().unwrap().is_empty()
+            || self.admin_group_ids.is_some() && !self.admin_group_ids.as_ref().unwrap().is_empty()
+            || self.user_permissions.as_ref().map(|perms| perms.iter().any(|user| user.permissions.manage)).unwrap_or(false)
+            || self.group_permissions.as_ref().map(|perms| perms.iter().any(|group| group.permissions.manage)).unwrap_or(false);
+        //    || self.inherit_permissions.is_some() && self.inherit_permissions.unwrap();
+
+        if !has_admin {
+            return Err(DcCmdError::ImportedRoomHasNoAdmin(format!("Room '{}' does not have an admin.", self.name)));
+        }
+
+        if let Some(sub_rooms) = &self.sub_rooms {
+            for room in sub_rooms {
+                room.check_all_rooms_have_admin()?;
+            }
+        }
+
+        Ok(())
     }
 }
 

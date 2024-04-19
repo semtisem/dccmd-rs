@@ -44,6 +44,8 @@ pub enum DcCmdError {
     LogFileCreationFailed,
     #[error("Insufficent permission to perform action")]
     InsufficentPermissions(String),
+    #[error("Room does not have an admin")]
+    ImportedRoomHasNoAdmin(String),
 }
 
 impl From<DracoonClientError> for DcCmdError {
