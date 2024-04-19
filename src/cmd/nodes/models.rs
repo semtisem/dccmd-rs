@@ -104,8 +104,10 @@ impl RoomImport {
         let room_struct: Vec<RoomImport> = serde_json::from_str(&data)
             .expect("JSON does not have correct format.");
 
+        // might want to collect errors and return them all at once to fix multiple issues at once
         for room in &room_struct {
             room.check_all_rooms_have_admin()?;
+            room.check_illegal_characters_in_room_name()?;
         }
 
         Ok(room_struct)
@@ -130,6 +132,36 @@ impl RoomImport {
 
         Ok(())
     }
+
+    fn check_illegal_characters_in_room_name(&self) -> Result<(), DcCmdError> {        
+        let illegal_characters = vec!["\\", "/", ":", "*", "?", "\"", "<", ">", "|"];
+        for character in illegal_characters {
+            if self.name.contains(character) {
+                return Err(DcCmdError::IllegalRoomName(format!("Room '{}' contains illegal character '{}'.", self.name, character)));
+            }
+        }
+
+        if self.name.len() > 255 {
+            return Err(DcCmdError::IllegalRoomName(format!("Room '{}' name is too long.", self.name)));
+        }
+
+        if self.name.starts_with('-') {
+            return Err(DcCmdError::IllegalRoomName(format!("Room '{}' name begins with a hyphen.", self.name)));
+        }
+
+        if self.name.ends_with('.') {
+            return Err(DcCmdError::IllegalRoomName(format!("Room '{}' name ends with a period.", self.name)));
+        }
+
+        if let Some(sub_rooms) = &self.sub_rooms {
+            for room in sub_rooms {
+                room.check_illegal_characters_in_room_name()?;
+            }
+        }
+
+        Ok(())
+    }
+
 }
 
 

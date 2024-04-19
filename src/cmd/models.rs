@@ -46,6 +46,8 @@ pub enum DcCmdError {
     InsufficentPermissions(String),
     #[error("Room does not have an admin")]
     ImportedRoomHasNoAdmin(String),
+    #[error("Room name contains illegal character")]
+    IllegalRoomName(String),
 }
 
 impl From<DracoonClientError> for DcCmdError {
