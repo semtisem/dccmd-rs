@@ -49,7 +49,7 @@ pub async fn create_room_structure(
         .expect("Error writing message to terminal.");
 
     // if the script user hasn't been given admin permissions in a room, we need to temporarily give it admin permissions and revoke them later or update the permissions of the script user 
-    
+
     let rooms_to_adjust_permissions: Arc<RwLock<HashMap<RoomId, Option<NodePermissions>>>> = Arc::new(RwLock::new(HashMap::new()));
     create_rooms_and_subrooms_update_permissions_policies(&term, &dracoon, parent_node.id, room_struct, path, rooms_to_adjust_permissions.clone(), current_user_acc.id).await?;
 
@@ -79,7 +79,6 @@ async fn check_user_permissions_on_parent(dracoon: &Dracoon<Connected>, term: &T
         }
     }
 
-    // todo fix i64 type in userinfo (dco3)
     if !user_list.iter().any(|user| u64::try_from(user.user_info.id).unwrap() == current_user_acc.id && user.permissions.clone().unwrap().manage) {
         error!("Script user does not have permission to create rooms in: {}", &path);
         term.write_line(&std::format!("Script user does not have permission to create rooms in: {}", &path))
