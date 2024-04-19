@@ -53,7 +53,6 @@ pub async fn create_room_structure(
     let rooms_to_adjust_permissions: Arc<RwLock<HashMap<RoomId, Option<NodePermissions>>>> = Arc::new(RwLock::new(HashMap::new()));
     create_rooms_and_subrooms_update_permissions_policies(&term, &dracoon, parent_node.id, room_struct, path, rooms_to_adjust_permissions.clone(), current_user_acc.id).await?;
 
-    println!("rooms_to_adjust_permissions: {:?}", rooms_to_adjust_permissions);
     // revert permission changes for script user
     adjust_permissions(&term, &dracoon, rooms_to_adjust_permissions, current_user_acc.id).await?;
     Ok(())
@@ -171,7 +170,6 @@ async fn create_rooms_and_subrooms_update_permissions_policies(
         }
 
         if let Some(policies) = room.policies {
-            println!("Policies: {:?}", policies);
             let mut new_policies = RoomPoliciesRequest::builder()
                 .with_default_expiration_period(policies.default_expiration_period.unwrap_or(0));
 
@@ -181,10 +179,6 @@ async fn create_rooms_and_subrooms_update_permissions_policies(
             let new_policies = new_policies.build();
             dracoon.nodes.update_room_policies(created_room.id, new_policies).await?;
         }
-
-        info!("Subrooms: {:?}", room.sub_rooms);
-        term.write_line(&std::format!("Subrooms: {:?}", room.sub_rooms))
-            .expect("Error writing message to terminal.");
       
         if let Some(sub_rooms) = room.sub_rooms {
             println!("Subrooms: {:?}", sub_rooms); 
