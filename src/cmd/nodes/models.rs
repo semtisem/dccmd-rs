@@ -1,6 +1,6 @@
 use console::Term;
-use dco3::{auth::Connected, Dracoon};
 use dco3::nodes::{GroupMemberAcceptance, NodePermissions};
+use dco3::{auth::Connected, Dracoon};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
@@ -93,75 +93,94 @@ pub struct RoomImport {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RoomId(pub u64);
 
-
 impl RoomImport {
-    pub fn from_path(path: String,) -> Result<Vec<Self>, DcCmdError> {
+    pub fn from_path(path: String) -> Result<Vec<Self>, DcCmdError> {
         let data = std::fs::read_to_string(&path).map_err(|e| {
             error!("Failed to read file: {}", e);
             DcCmdError::IoError
         })?;
-    
-        let room_struct: Vec<RoomImport> = serde_json::from_str(&data)
-            .expect("JSON does not have correct format.");
+
+        let room_struct: Vec<RoomImport> =
+            serde_json::from_str(&data).expect("JSON does not have correct format.");
 
         // might want to collect errors and return them all at once to fix multiple issues at once
         for room in &room_struct {
             room.check_all_rooms_have_admin()?;
             room.check_illegal_characters_in_room_name()?;
         }
-
         Ok(room_struct)
     }
 
     fn check_all_rooms_have_admin(&self) -> Result<(), DcCmdError> {
         let has_admin = self.admin_ids.is_some() && !self.admin_ids.as_ref().unwrap().is_empty()
             || self.admin_group_ids.is_some() && !self.admin_group_ids.as_ref().unwrap().is_empty()
-            || self.user_permissions.as_ref().map(|perms| perms.iter().any(|user| user.permissions.manage)).unwrap_or(false)
-            || self.group_permissions.as_ref().map(|perms| perms.iter().any(|group| group.permissions.manage)).unwrap_or(false);
-        //    || self.inherit_permissions.is_some() && self.inherit_permissions.unwrap();
+            || self
+                .user_permissions
+                .as_ref()
+                .map(|perms| perms.iter().any(|user| user.permissions.manage))
+                .unwrap_or(false)
+            || self
+                .group_permissions
+                .as_ref()
+                .map(|perms| perms.iter().any(|group| group.permissions.manage))
+                .unwrap_or(false)
+            || self.inherit_permissions.unwrap_or(false);
 
         if !has_admin {
-            return Err(DcCmdError::ImportedRoomHasNoAdmin(format!("Room '{}' does not have an admin.", self.name)));
+            return Err(DcCmdError::ImportedRoomHasNoAdmin(format!(
+                "Room '{}' does not have an admin and inheritance is disabled.",
+                self.name
+            )));
         }
 
         if let Some(sub_rooms) = &self.sub_rooms {
-            for room in sub_rooms {
-                room.check_all_rooms_have_admin()?;
-            }
+            sub_rooms
+                .iter()
+                .try_for_each(|room| room.check_all_rooms_have_admin())?;
         }
 
         Ok(())
     }
 
-    fn check_illegal_characters_in_room_name(&self) -> Result<(), DcCmdError> {        
-        let illegal_characters = vec!["\\", "/", ":", "*", "?", "\"", "<", ">", "|"];
-        for character in illegal_characters {
-            if self.name.contains(character) {
-                return Err(DcCmdError::IllegalRoomName(format!("Room '{}' contains illegal character '{}'.", self.name, character)));
-            }
+    fn check_illegal_characters_in_room_name(&self) -> Result<(), DcCmdError> {
+        let illegal_characters = ["\\", "/", ":", "*", "?", "\"", "<", ">", "|"];
+        if illegal_characters
+            .iter()
+            .any(|character| self.name.contains(character))
+        {
+            return Err(DcCmdError::IllegalRoomName(format!(
+                "Room '{}' contains illegal character.",
+                self.name
+            )));
         }
 
         if self.name.len() > 255 {
-            return Err(DcCmdError::IllegalRoomName(format!("Room '{}' name is too long.", self.name)));
+            return Err(DcCmdError::IllegalRoomName(format!(
+                "Room '{}' name is too long.",
+                self.name
+            )));
         }
 
         if self.name.starts_with('-') {
-            return Err(DcCmdError::IllegalRoomName(format!("Room '{}' name begins with a hyphen.", self.name)));
+            return Err(DcCmdError::IllegalRoomName(format!(
+                "Room '{}' name begins with a hyphen.",
+                self.name
+            )));
         }
 
         if self.name.ends_with('.') {
-            return Err(DcCmdError::IllegalRoomName(format!("Room '{}' name ends with a period.", self.name)));
+            return Err(DcCmdError::IllegalRoomName(format!(
+                "Room '{}' name ends with a period.",
+                self.name
+            )));
         }
 
         if let Some(sub_rooms) = &self.sub_rooms {
-            for room in sub_rooms {
-                room.check_illegal_characters_in_room_name()?;
-            }
+            sub_rooms
+                .iter()
+                .try_for_each(|room| room.check_illegal_characters_in_room_name())?;
         }
 
         Ok(())
     }
-
 }
-
-
