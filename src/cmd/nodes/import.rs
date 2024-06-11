@@ -1,11 +1,11 @@
 use async_recursion::async_recursion;
 use console::Term;
+use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-};
-use tracing::{error, info};
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::RwLock;
+use tokio::{sync::mpsc, task::JoinSet};
+use tracing::{debug, error, info};
 
 use dco3::{
     auth::Connected,
@@ -18,7 +18,10 @@ use dco3::{
     Dracoon, ListAllParams,
 };
 
-use super::models::{GroupRoomPermission, RoomId, RoomImport, RoomPolicies, UserRoomPermission};
+use super::models::{
+    GroupRoomPermission, Room, RoomId, RoomImport, RoomPolicies, UpdateTask, UpdateTaskType,
+    UpdateTasksChannel, UserRoomPermission,
+};
 
 use crate::cmd::{
     init_dracoon,
@@ -26,22 +29,113 @@ use crate::cmd::{
     utils::strings::parse_path,
 };
 
-pub async fn create_room_structure(
+pub async fn import_and_create_room_structure(
     term: Term,
     source: String,
     classification: Option<u8>,
-    path: String,
+    json_path: String,
     auth: Option<PasswordAuth>,
 ) -> Result<(), DcCmdError> {
-    let room_struct = RoomImport::from_path(path)?;
     let dracoon = init_dracoon(&source, auth, false).await?;
+
+    let room_import = RoomImport::from_path(json_path, &dracoon, term.clone()).await?;
+
     let current_user_acc = dracoon.get_user_info().await?;
+
+    let (parent_id, path) =
+        validate_node_path_and_get_parent_id(&source, &dracoon, &term, current_user_acc.clone())
+            .await?;
+
+    let mut update_room_tasks_channel = UpdateTasksChannel::new();
+
+    let rooms_to_adjust_permissions = process_rooms_wrapper(
+        term.clone(),
+        dracoon.clone(),
+        room_import.clone(),
+        room_import.total_room_count,
+        parent_id,
+        path,
+        current_user_acc.clone(),
+        update_room_tasks_channel.get_sender(),
+    )
+    .await;
+
+    update_room_tasks_channel
+        .collect_than_complete(term.clone(), &dracoon)
+        .await;
+
+    // revert permission changes for user
+    adjust_temp_admin_permissions(
+        term,
+        dracoon.clone(),
+        rooms_to_adjust_permissions.clone(),
+        current_user_acc.id,
+    )
+    .await?;
+
+    Ok(())
+}
+async fn process_rooms_wrapper(
+    term: Term,
+    dracoon: Dracoon<Connected>,
+    room_import: RoomImport,
+    total_room_count: u64,
+    parent_id: Option<u64>,
+    path: String,
+    current_user_acc: UserAccount,
+    sender: mpsc::Sender<UpdateTask>,
+) -> Arc<RwLock<HashMap<RoomId, Option<NodePermissions>>>> {
+    // if the user hasn't been given admin permissions in a room, we need to temporarily give it admin permissions and revoke them later or update the permissions of the user
+    let rooms_to_adjust_permissions: Arc<RwLock<HashMap<RoomId, Option<NodePermissions>>>> =
+        Arc::new(RwLock::new(HashMap::new()));
+
+    info!("Creating room structure at path: {}/", &path);
+    term.write_line(&std::format!("Creating room structure at path: {}/", &path))
+        .expect("Error writing message to terminal.");
+
+    let progress_bar = ProgressBar::new(total_room_count);
+    progress_bar.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("=>-"),
+    );
+    progress_bar.set_length(total_room_count);
+    let message = format!("Creating room structure");
+    progress_bar.set_message(message.clone());
+
+    let res = process_rooms(
+        term.clone(),
+        dracoon.clone(),
+        parent_id,
+        room_import.rooms,
+        path.clone(),
+        rooms_to_adjust_permissions.clone(),
+        current_user_acc.id,
+        sender,
+        progress_bar.clone(),
+    )
+    .await;
+
+    progress_bar.finish_with_message(format!(
+        "Created {total_room_count} rooms successfully. Adjusting permissions and policies now"
+    ));
+
+    rooms_to_adjust_permissions
+}
+
+async fn validate_node_path_and_get_parent_id(
+    source: &String,
+    dracoon: &Dracoon<Connected>,
+    term: &Term,
+    current_user_acc: UserAccount,
+) -> Result<(Option<u64>, String), DcCmdError> {
     let (parent_path, node_name, _) = parse_path(&source, dracoon.get_base_url().as_ref())?;
     let mut parent_id = None;
     let path = format!("{}{}", &parent_path, &node_name);
 
     // check if root
-    if node_name.len() > 0 {
+    if !node_name.is_empty() {
         let parent_node = dracoon
             .nodes
             .get_node_from_path(&path)
@@ -53,6 +147,7 @@ pub async fn create_room_structure(
         }
 
         parent_id = Some(parent_node.id);
+        Ok((parent_id, path))
     } else {
         check_user_permissions_on_parent(
             &dracoon,
@@ -62,36 +157,8 @@ pub async fn create_room_structure(
             current_user_acc.clone(),
         )
         .await?;
+        Ok((parent_id, path))
     }
-
-    info!("Creating room structure at path: {}/", &path);
-    term.write_line(&std::format!("Creating room structure at path: {}/", &path))
-        .expect("Error writing message to terminal.");
-
-    // if the user hasn't been given admin permissions in a room, we need to temporarily give it admin permissions and revoke them later or update the permissions of the user
-    // To check if rw lock is okay
-    let rooms_to_adjust_permissions: Arc<RwLock<HashMap<RoomId, Option<NodePermissions>>>> =
-        Arc::new(RwLock::new(HashMap::new()));
-    create_rooms_and_subrooms_update_permissions_policies(
-        &term,
-        &dracoon,
-        parent_id,
-        room_struct,
-        path,
-        rooms_to_adjust_permissions.clone(),
-        current_user_acc.id,
-    )
-    .await?;
-
-    // revert permission changes for user
-    adjust_permissions(
-        &term,
-        &dracoon,
-        rooms_to_adjust_permissions,
-        current_user_acc.id,
-    )
-    .await?;
-    Ok(())
 }
 
 async fn check_user_permissions_on_parent(
@@ -174,100 +241,261 @@ async fn check_user_permissions_on_parent(
 }
 
 #[async_recursion]
-async fn create_rooms_and_subrooms_update_permissions_policies(
-    term: &Term,
-    dracoon: &Dracoon<Connected>,
+async fn process_rooms(
+    term: Term,
+    dracoon: Dracoon<Connected>,
     parent_id: Option<u64>,
-    room_struct: Vec<RoomImport>,
+    room_struct: Vec<Room>,
     path: String,
     rooms_to_adjust_permissions: Arc<RwLock<HashMap<RoomId, Option<NodePermissions>>>>,
     current_user_id: u64,
+    room_update_tasks_sender: mpsc::Sender<UpdateTask>,
+    progress_bar: ProgressBar,
 ) -> Result<(), DcCmdError> {
-    for mut room in room_struct {
-        let created_room: Node = create_room(
-            term,
-            dracoon,
-            parent_id,
-            &mut room,
-            &path,
-            rooms_to_adjust_permissions.clone(),
-            current_user_id,
-        )
-        .await?;
+    let mut room_tasks: JoinSet<Result<Node, DcCmdError>> = JoinSet::new();
 
-        update_room_users(
-            term,
-            dracoon,
-            created_room.id,
-            room.user_permissions,
-            rooms_to_adjust_permissions.clone(),
-            current_user_id,
-        )
-        .await?;
-
-        update_room_groups(term, dracoon, created_room.id, room.group_permissions).await?;
-
-        update_room_policies(term, dracoon, created_room.id, room.policies).await?;
-
-        if let Some(sub_rooms) = room.sub_rooms {
-            let new_parent_path = created_room.parent_path.unwrap() + &created_room.name;
-            create_rooms_and_subrooms_update_permissions_policies(
-                term,
-                dracoon,
-                Some(created_room.id),
-                sub_rooms,
-                new_parent_path,
-                rooms_to_adjust_permissions.clone(),
-                current_user_id,
+    for room in room_struct {
+        // need clone bc of move
+        let path = path.clone();
+        let term = term.clone();
+        let rooms_to_adjust_permissions = rooms_to_adjust_permissions.clone();
+        let dracoon = dracoon.clone();
+        let room_update_tasks_sender = room_update_tasks_sender.clone();
+        let progress_bar = progress_bar.clone();
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        room_tasks.spawn(async move {
+            let created_room = process_room(
+                term.clone(),
+                dracoon.clone(),
+                parent_id.clone(),
+                room.clone(),
+                path.clone(),
+                rooms_to_adjust_permissions,
+                current_user_id.clone(),
+                room_update_tasks_sender.clone(),
+                progress_bar.clone(),
             )
-            .await?
+            .await?;
+            progress_bar.inc(1);
+            Ok(created_room)
+        });
+    }
+
+    while let Some(res) = room_tasks.join_next().await {
+        match res {
+            Ok(task_res) => match task_res {
+                Ok(node) => {
+                    let message = format!("Created room: {} at path: {}", node.name, path);
+                    info!("{}", message);
+                    progress_bar.set_message(message);
+                }
+                Err(e) => {
+                    error!("Error creating room: {}", e);
+                    term.write_line(&std::format!("Error creating room: {}", e))
+                        .expect("Error writing message to terminal.");
+                }
+            },
+            Err(e) => {
+                error!("Error creating room: {}", e);
+                term.write_line(&std::format!("Error creating room: {}", e))
+                    .expect("Error writing message to terminal.");
+            }
         }
     }
+
     Ok(())
 }
 
-async fn adjust_permissions(
-    term: &Term,
-    dracoon: &Dracoon<Connected>,
+async fn process_room(
+    term: Term,
+    dracoon: Dracoon<Connected>,
+    parent_id: Option<u64>,
+    mut room: Room,
+    path: String,
+    rooms_to_adjust_permissions: Arc<RwLock<HashMap<RoomId, Option<NodePermissions>>>>,
+    current_user_id: u64,
+    room_update_tasks_sender: mpsc::Sender<UpdateTask>,
+    progress_bar: ProgressBar,
+) -> Result<Node, DcCmdError> {
+    let created_room = create_room(
+        term.clone(),
+        dracoon.clone(),
+        parent_id,
+        &mut room,
+        &path,
+        rooms_to_adjust_permissions.clone(),
+        current_user_id,
+    )
+    .await?;
+
+    let created_room_id = created_room.id.clone();
+
+    update_room_groups(
+        term.clone(),
+        dracoon.clone(),
+        created_room_id,
+        room.group_permissions.clone(),
+        room_update_tasks_sender.clone(),
+    )
+    .await?;
+
+    update_room_users(
+        term.clone(),
+        dracoon.clone(),
+        created_room_id.clone(),
+        room.user_permissions.clone(),
+        rooms_to_adjust_permissions.clone(),
+        current_user_id,
+        room_update_tasks_sender.clone(),
+    )
+    .await?;
+
+    update_room_policies(
+        term.clone(),
+        dracoon.clone(),
+        created_room_id.clone(),
+        room.policies.clone(),
+        room_update_tasks_sender.clone(),
+    )
+    .await?;
+
+    if let Some(sub_rooms) = room.sub_rooms.clone() {
+        let new_parent_path = created_room.parent_path.clone().unwrap() + &created_room.name;
+        process_rooms(
+            term.clone(),
+            dracoon.clone(),
+            Some(created_room.id),
+            sub_rooms,
+            new_parent_path,
+            rooms_to_adjust_permissions.clone(),
+            current_user_id,
+            room_update_tasks_sender,
+            progress_bar.clone(),
+        )
+        .await?
+    }
+
+    Ok(created_room)
+}
+
+async fn adjust_temp_admin_permissions(
+    term: Term,
+    dracoon: Dracoon<Connected>,
     rooms_to_adjust_permissions: Arc<RwLock<HashMap<RoomId, Option<NodePermissions>>>>,
     current_user_id: u64,
 ) -> Result<(), DcCmdError> {
-    // TO DO: consider using an async-aware `Mutex` type or ensuring the `MutexGuard` is dropped before calling await
-    for (room_id, permissions) in rooms_to_adjust_permissions.read().unwrap().iter() {
-        info!("Adjusting permissions for user in room: {}", room_id.0);
-        term.write_line(&std::format!(
-            "Adjusting permissions for user in room: {}, {}",
-            room_id.0,
-            permissions.is_some()
-        ))
-        .expect("Error writing message to terminal.");
+    let total_size = rooms_to_adjust_permissions.read().await.len() as u64;
+    let progress_bar = ProgressBar::new(total_size);
+    progress_bar.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("=>-"),
+    );
+    progress_bar.set_length(total_size as u64);
+    let message = format!("Adjusting permissions of script user in rooms");
+    progress_bar.set_message(message.clone());
+    static MAX_CONCURRENT: usize = 2;
+
+    let mut join_set = JoinSet::new();
+    // todo check how different futures can be held in a single vec
+    let mut batch_requests_update = Vec::new();
+    let mut batch_requests_delete = Vec::new();
+
+    for (room_id, permissions) in rooms_to_adjust_permissions.read().await.iter() {
+        let room_id = room_id.clone();
+        let permissions = permissions.clone();
+        let dracoon = dracoon.clone();
+        let progress_bar_clone = progress_bar.clone();
         if let Some(permissions) = permissions {
-            info!("Updating user permissions in room: {}", room_id.0);
             let user_update =
                 RoomUsersAddBatchRequestItem::new(current_user_id, permissions.clone());
-            dracoon
-                .nodes
-                .update_room_users(room_id.0, vec![user_update].into())
-                .await?;
+            let task = async move {
+                let res = dracoon
+                    .nodes
+                    .update_room_users(room_id.0.clone(), vec![user_update].into())
+                    .await;
+                // to do handle error
+                progress_bar_clone.inc(1);
+                res
+            };
+            batch_requests_update.push(task);
         } else {
-            info!("Deleting user from room: {}", room_id.0);
-            term.write_line(&std::format!("Deleting user from room: {}", room_id.0))
-                .expect("Error writing message to terminal.");
-            dracoon
-                .nodes
-                .delete_room_users(room_id.0, vec![current_user_id].into())
-                .await?;
+            let task = async move {
+                let res = dracoon
+                    .nodes
+                    .delete_room_users(room_id.0, vec![current_user_id].into())
+                    .await;
+                // to do handle error
+                progress_bar_clone.inc(1);
+                res
+            };
+            batch_requests_delete.push(task)
         }
     }
+
+    for request in batch_requests_update {
+        while join_set.len() >= MAX_CONCURRENT {
+            while let Some(res) = join_set.join_next().await {
+                match res {
+                    Ok(_) => {
+                        info!("Permissions adjusted successfully");
+                    }
+                    Err(e) => {
+                        error!("Error adjusting permissions: {}", e);
+                        term.write_line(&std::format!("Error adjusting permissions: {}", e))
+                            .expect("Error writing message to terminal.");
+                    }
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        join_set.spawn(request);
+    }
+
+    for request in batch_requests_delete {
+        while join_set.len() >= MAX_CONCURRENT {
+            while let Some(res) = join_set.join_next().await {
+                match res {
+                    Ok(_) => {
+                        info!("Permissions adjusted successfully");
+                    }
+                    Err(e) => {
+                        error!("Error adjusting permissions: {}", e);
+                        term.write_line(&std::format!("Error adjusting permissions: {}", e))
+                            .expect("Error writing message to terminal.");
+                    }
+                }
+            }
+        }
+        // wait for 200ms before adding new task to join_set to avoid 500 error
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        join_set.spawn(request);
+    }
+
+    while let Some(res) = join_set.join_next().await {
+        match res {
+            Ok(_) => {
+                info!("Permissions adjusted successfully");
+            }
+            Err(e) => {
+                error!("Error adjusting permissions: {}", e);
+                term.write_line(&std::format!("Error adjusting permissions: {}", e))
+                    .expect("Error writing message to terminal.");
+            }
+        }
+    }
+
+    progress_bar.finish_with_message(format!("Successfully adjusted {total_size} permission(s)"));
 
     Ok(())
 }
 
 async fn create_room(
-    term: &Term,
-    dracoon: &Dracoon<Connected>,
+    term: Term,
+    dracoon: Dracoon<Connected>,
     parent_id: Option<u64>,
-    room: &mut RoomImport,
+    room: &mut Room,
     path: &String,
     rooms_to_adjust_permissions: Arc<RwLock<HashMap<RoomId, Option<NodePermissions>>>>,
     current_user_id: u64,
@@ -334,28 +562,22 @@ async fn create_room(
     if adjust_permissions {
         rooms_to_adjust_permissions
             .write()
-            .unwrap()
+            .await
             .insert(RoomId(created_room.id), permissions_to_adjust);
     }
 
-    info!("Creatied room: {} at path: {}", room.name, path);
-    term.write_line(&std::format!(
-        "Created room: {} at path: {}/",
-        room.name,
-        path
-    ))
-    .expect("Error writing message to terminal.");
-
+    info!("Created room: {} at path: {}", room.name, path);
     Ok(created_room)
 }
 
 async fn update_room_users(
-    term: &Term,
-    dracoon: &Dracoon<Connected>,
+    term: Term,
+    dracoon: Dracoon<Connected>,
     room_id: u64,
     user_permissions: Option<Vec<UserRoomPermission>>,
     rooms_to_adjust_permissions: Arc<RwLock<HashMap<RoomId, Option<NodePermissions>>>>,
     current_user_id: u64,
+    room_update_tasks_sender: mpsc::Sender<UpdateTask>,
 ) -> Result<(), DcCmdError> {
     if let Some(user_permissions) = user_permissions {
         let mut user_updates: Vec<RoomUsersAddBatchRequestItem> = vec![];
@@ -365,7 +587,7 @@ async fn update_room_users(
                 // save original permissions to update them later
                 rooms_to_adjust_permissions
                     .write()
-                    .unwrap()
+                    .await
                     .insert(RoomId(room_id), Some(permissions.clone()));
                 // give temp admin right to user
                 permissions.manage = true;
@@ -380,19 +602,42 @@ async fn update_room_users(
                 user_updates.push(user_update);
             }
         }
-        dracoon
-            .nodes
-            .update_room_users(room_id, user_updates.into())
-            .await?;
+
+        let res = room_update_tasks_sender
+            .send(UpdateTask {
+                task_type: UpdateTaskType::RoomUser(RoomId(room_id), user_updates),
+            })
+            .await;
+
+        match res {
+            Ok(_) => {
+                debug!("Send task to update user permissions for room: {}", room_id);
+            }
+            Err(e) => {
+                error!(
+                    "Reciever closed. Error sending task to update user permissions for room: {}",
+                    e
+                );
+                term.write_line(&std::format!(
+                    "Reciever closed. Error sending task to update user permissions for room: {}",
+                    e
+                ))
+                .expect("Error writing message to terminal.");
+            }
+        }
+    } else {
+        debug!("No user permissions to update for room: {}", room_id);
     }
+
     Ok(())
 }
 
 async fn update_room_groups(
-    term: &Term,
-    dracoon: &Dracoon<Connected>,
+    term: Term,
+    dracoon: Dracoon<Connected>,
     room_id: u64,
     group_permissions: Option<Vec<GroupRoomPermission>>,
+    room_update_tasks_sender: mpsc::Sender<UpdateTask>,
 ) -> Result<(), DcCmdError> {
     if let Some(group_permissions) = group_permissions {
         let mut group_updates: Vec<RoomGroupsAddBatchRequestItem> = vec![];
@@ -404,19 +649,45 @@ async fn update_room_groups(
             );
             group_updates.push(group_update);
         }
-        dracoon
-            .nodes
-            .update_room_groups(room_id, group_updates.into())
-            .await?;
+
+        let res = room_update_tasks_sender
+            .send(UpdateTask {
+                task_type: UpdateTaskType::RoomGroup(RoomId(room_id), group_updates),
+            })
+            .await;
+
+        match res {
+            Ok(_) => {
+                debug!(
+                    "Send task to update group permissions for room: {}",
+                    room_id
+                );
+            }
+            Err(e) => {
+                error!(
+                    "Reciever closed. Error sending task to update group permissions for room: {}",
+                    e
+                );
+                term.write_line(&std::format!(
+                    "Reciever closed. Error sending task to update group permissions for room: {}",
+                    e
+                ))
+                .expect("Error writing message to terminal.");
+            }
+        }
+    } else {
+        debug!("No task to update group permissions for room: {}", room_id);
     }
+
     Ok(())
 }
 
 async fn update_room_policies(
-    term: &Term,
-    dracoon: &Dracoon<Connected>,
+    term: Term,
+    dracoon: Dracoon<Connected>,
     room_id: u64,
     policies: Option<RoomPolicies>,
+    room_update_tasks_sender: mpsc::Sender<UpdateTask>,
 ) -> Result<(), DcCmdError> {
     if let Some(policies) = policies {
         let mut new_policies = RoomPoliciesRequest::builder()
@@ -426,11 +697,31 @@ async fn update_room_policies(
             new_policies = new_policies.with_virus_protection_enabled(is_virus_protection_enabled);
         }
         let new_policies = new_policies.build();
-        dracoon
-            .nodes
-            .update_room_policies(room_id, new_policies)
-            .await?;
-    }
 
+        let res = room_update_tasks_sender
+            .send(UpdateTask {
+                task_type: UpdateTaskType::RoomPolicies(RoomId(room_id), new_policies),
+            })
+            .await;
+
+        match res {
+            Ok(_) => {
+                debug!("Send task to update room policies for room: {}", room_id);
+            }
+            Err(e) => {
+                error!(
+                    "Reciever closed. Error sending task to update room policies for room: {}",
+                    e
+                );
+                term.write_line(&std::format!(
+                    "Reciever closed. Error sending task to update room policies for room: {}",
+                    e
+                ))
+                .expect("Error writing message to terminal.");
+            }
+        }
+    } else {
+        debug!("No room policies to update for room: {}", room_id);
+    }
     Ok(())
 }

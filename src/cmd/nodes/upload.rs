@@ -158,7 +158,7 @@ async fn upload_file(
     };
     let keep_share_links = matches!(resolution_strategy, ResolutionStrategy::Overwrite);
 
-    let upload_options = UploadOptions::builder()
+    let upload_options = UploadOptions::builder(file_meta)
         .with_classification(classification)
         .with_resolution_strategy(resolution_strategy)
         .with_keep_share_links(keep_share_links)
@@ -168,7 +168,6 @@ async fn upload_file(
 
     let node = dracoon
         .upload(
-            file_meta,
             target_node,
             upload_options,
             reader,
@@ -618,7 +617,7 @@ async fn upload_files(
 
                 let keep_share_links = matches!(resolution_strategy, ResolutionStrategy::Overwrite);
 
-                let upload_options = UploadOptions::builder()
+                let upload_options = UploadOptions::builder(file_meta)
                     .with_classification(classification)
                     .with_resolution_strategy(resolution_strategy)
                     .with_keep_share_links(keep_share_links)
@@ -628,7 +627,6 @@ async fn upload_files(
 
                 client
                     .upload(
-                        file_meta,
                         &parent_node,
                         upload_options,
                         reader,
