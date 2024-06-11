@@ -146,14 +146,10 @@ async fn main() {
         DcCmdCommand::Mkroom {
             source,
             classification,
-            path,
-        } => match path {
-            Some(path) => {
-                import_and_create_room_structure(term, source, classification, path, password_auth)
-                    .await
-            }
-            None => create_room(term, source, classification, password_auth).await,
-        },
+        } => create_room(term, source, classification, password_auth).await,
+        DcCmdCommand::ImportRooms { source, path } => {
+            import_and_create_room_structure(term, source, path, password_auth).await
+        }
 
         DcCmdCommand::Rm { source, recursive } => {
             delete_node(term, source, Some(recursive), password_auth).await

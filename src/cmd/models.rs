@@ -197,10 +197,15 @@ pub enum DcCmdCommand {
         /// classification of the node (1-4)
         #[clap(long)]
         classification: Option<u8>,
-
-        path: Option<String>,
     },
 
+    /// Import and create room structure in DRACOON
+    ImportRooms {
+        /// Source file path
+        source: String,
+        /// Path to create room structure
+        path: String,
+    },
     /// Delete a node in DRACOON
     Rm {
         /// Source file path in DRACOON

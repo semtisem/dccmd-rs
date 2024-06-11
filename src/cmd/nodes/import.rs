@@ -32,7 +32,6 @@ use crate::cmd::{
 pub async fn import_and_create_room_structure(
     term: Term,
     source: String,
-    classification: Option<u8>,
     json_path: String,
     auth: Option<PasswordAuth>,
 ) -> Result<(), DcCmdError> {
