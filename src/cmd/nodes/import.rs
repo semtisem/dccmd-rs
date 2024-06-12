@@ -331,7 +331,6 @@ async fn process_room(
 
     update_room_groups(
         term.clone(),
-        dracoon.clone(),
         created_room_id,
         room.group_permissions.clone(),
         room_update_tasks_sender.clone(),
@@ -340,7 +339,6 @@ async fn process_room(
 
     update_room_users(
         term.clone(),
-        dracoon.clone(),
         created_room_id.clone(),
         room.user_permissions.clone(),
         rooms_to_adjust_permissions.clone(),
@@ -351,7 +349,6 @@ async fn process_room(
 
     update_room_policies(
         term.clone(),
-        dracoon.clone(),
         created_room_id.clone(),
         room.policies.clone(),
         room_update_tasks_sender.clone(),
@@ -571,7 +568,6 @@ async fn create_room(
 
 async fn update_room_users(
     term: Term,
-    dracoon: Dracoon<Connected>,
     room_id: u64,
     user_permissions: Option<Vec<UserRoomPermission>>,
     rooms_to_adjust_permissions: Arc<RwLock<HashMap<RoomId, Option<NodePermissions>>>>,
@@ -633,7 +629,6 @@ async fn update_room_users(
 
 async fn update_room_groups(
     term: Term,
-    dracoon: Dracoon<Connected>,
     room_id: u64,
     group_permissions: Option<Vec<GroupRoomPermission>>,
     room_update_tasks_sender: mpsc::Sender<UpdateTask>,
@@ -683,7 +678,6 @@ async fn update_room_groups(
 
 async fn update_room_policies(
     term: Term,
-    dracoon: Dracoon<Connected>,
     room_id: u64,
     policies: Option<RoomPolicies>,
     room_update_tasks_sender: mpsc::Sender<UpdateTask>,
