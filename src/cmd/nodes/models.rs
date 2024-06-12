@@ -158,6 +158,16 @@ impl UpdateTasksChannel {
     }
 
     pub async fn collect_than_complete(&mut self, term: Term, dracoon: &Dracoon<Connected>) {
+        self.collect_tasks(term.clone()).await;
+
+        // Shutdown the reciever
+        self.shutdown(term.clone());
+
+        self.complete_tasks(dracoon, term).await;
+    }
+
+    /// pub only for testing
+    pub async fn collect_tasks(&mut self, term: Term) {
         if self.tx.capacity() == CAPACITY {
             debug!("No tasks to collect.");
             return;
@@ -186,11 +196,6 @@ impl UpdateTasksChannel {
                 break;
             }
         }
-
-        // Shutdown the reciever
-        self.shutdown(term.clone());
-
-        self.complete_tasks(dracoon, term).await;
     }
 
     async fn complete_tasks(&mut self, dracoon: &Dracoon<Connected>, term: Term) {
@@ -365,6 +370,10 @@ impl UpdateTasksChannel {
     pub fn shutdown(&mut self, term: Term) {
         debug!("Shutting down reciever for UpdateTasks.");
         self.rx.close();
+    }
+
+    pub fn get_policy_task_count(&self) -> usize {
+        self.room_policies_tasks.0.len()
     }
 }
 
