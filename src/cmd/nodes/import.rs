@@ -718,3 +718,34 @@ async fn update_room_policies(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_update_room_policies() {
+        let term = Term::stdout();
+        let room_id = 1;
+        let policies = RoomPolicies {
+            default_expiration_period: Some(0),
+            is_virus_protection_enabled: Some(true),
+        };
+
+        let mut room_update_task_channel = UpdateTasksChannel::new();
+        let room_update_tasks_sender = room_update_task_channel.get_sender();
+        let res = update_room_policies(
+            term.clone(),
+            room_id,
+            Some(policies),
+            room_update_tasks_sender,
+        )
+        .await
+        .unwrap();
+        assert_eq!(res, ());
+
+        room_update_task_channel.collect_tasks(term).await;
+
+        assert_eq!(room_update_task_channel.get_policy_task_count(), 1);
+    }
+}
