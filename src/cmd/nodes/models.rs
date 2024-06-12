@@ -515,6 +515,11 @@ impl RoomImport {
 
         let total_room_count = Self::get_total_rooms(room_struct.clone());
 
+        let virus_protection_policy_found =
+            Self::check_if_virus_protection_is_some(room_struct.clone());
+
+        // todo impl function in dco3 and check if virus protection is enabled when virus_protection_policy_found is true
+
         info!("Checking if user and group ids in JSON file exist.");
         term.write_line(&std::format!(
             "Checking if user and group ids in JSON file exist."
@@ -644,5 +649,15 @@ impl RoomImport {
             }
         }
         Ok(())
+    }
+
+    fn check_if_virus_protection_is_some(rooms: Vec<Room>) -> bool {
+        rooms.iter().any(|room| {
+            room.policies.as_ref().map_or(false, |policies| {
+                policies.is_virus_protection_enabled.is_some()
+            }) || room.sub_rooms.as_ref().map_or(false, |sub_rooms| {
+                Self::check_if_virus_protection_is_some(sub_rooms.clone())
+            })
+        })
     }
 }
