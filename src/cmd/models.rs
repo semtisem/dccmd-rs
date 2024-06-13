@@ -54,6 +54,8 @@ pub enum DcCmdError {
     UserDoesNotExist(String),
     #[error("Group does not exist")]
     GroupNotFound(String),
+    #[error("Parsing JSON template failed")]
+    JsonParseTemplateError(String),
 }
 
 impl From<DracoonClientError> for DcCmdError {
@@ -204,7 +206,9 @@ pub enum DcCmdCommand {
         /// Source file path
         source: String,
         /// Path to create room structure
-        path: String,
+        json_path: String,
+        /// Template filler path
+        template_filler_path: Option<String>,
     },
     /// Delete a node in DRACOON
     Rm {

@@ -33,11 +33,13 @@ pub async fn import_and_create_room_structure(
     term: Term,
     source: String,
     json_path: String,
+    template_filler_path: Option<String>,
     auth: Option<PasswordAuth>,
 ) -> Result<(), DcCmdError> {
     let dracoon = init_dracoon(&source, auth, false).await?;
 
-    let room_import = RoomImport::from_path(json_path, &dracoon, term.clone()).await?;
+    let room_import =
+        RoomImport::from_path(json_path, template_filler_path, &dracoon, term.clone()).await?;
 
     let current_user_acc = dracoon.get_user_info().await?;
 

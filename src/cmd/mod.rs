@@ -218,6 +218,7 @@ fn get_error_message(err: &DcCmdError) -> String {
         DcCmdError::ConflictingRoomPermissions(msg) => msg.to_string(),
         DcCmdError::UserDoesNotExist(msg) => msg.to_string(),
         DcCmdError::GroupNotFound(msg) => msg.to_string(),
+        DcCmdError::JsonParseTemplateError(msg) => msg.to_string(),
     }
 }
 

@@ -1,4 +1,7 @@
+use std::fs::File;
+
 use console::Term;
+use csv::Reader;
 use dco3::nodes::{
     GroupMemberAcceptance, NodePermissions, RoomGroupsAddBatchRequestItem, RoomPoliciesRequest,
     RoomUsersAddBatchRequestItem,
@@ -7,6 +10,7 @@ use dco3::{auth::Connected, Dracoon};
 use dco3::{Groups, Rooms, Users};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
+use tera::{Context, Tera};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
 
@@ -492,6 +496,7 @@ impl Room {
 impl RoomImport {
     pub async fn from_path(
         path: String,
+        template_filler_path: Option<String>,
         dracoon: &Dracoon<Connected>,
         term: Term,
     ) -> Result<Self, DcCmdError> {
@@ -500,8 +505,12 @@ impl RoomImport {
             DcCmdError::IoError
         })?;
 
-        let room_struct: Vec<Room> =
-            serde_json::from_str(&data).expect("JSON does not have correct format.");
+        let room_struct: Vec<Room> = match template_filler_path {
+            Some(template_filler_path) => {
+                Self::fill_template(template_filler_path, data, term.clone())
+            }
+            None => serde_json::from_str(&data).expect("JSON does not have correct format."),
+        };
 
         // might want to collect errors and return them all at once to fix multiple issues at once
         info!("Validating JSON file.");
@@ -659,5 +668,42 @@ impl RoomImport {
                 Self::check_if_virus_protection_is_some(sub_rooms.clone())
             })
         })
+    }
+
+    fn fill_template(
+        template_filler_path: String,
+        template_content: String,
+        term: Term,
+    ) -> Vec<Room> {
+        let file = File::open(template_filler_path).unwrap();
+        let mut csv_data = Reader::from_reader(file);
+
+        let headers = csv_data.headers().unwrap().clone();
+
+        let mut rooms = Vec::new();
+
+        for result in csv_data.records() {
+            let record = result.unwrap();
+
+            let mut context = Context::new();
+
+            for (i, header) in headers.iter().enumerate() {
+                if let Some(value) = record.get(i) {
+                    context.insert(header, value);
+                }
+            }
+
+            let tera = Tera::one_off(&template_content, &context, true).unwrap();
+
+            // Deserialize the JSON string to a Room struct
+            let room: Room = serde_json::from_str(&tera.as_str()).map_err(|e| {
+                error!("Failed to parse JSON: {}. Check if JSON template is an object and not an array.", e);
+                DcCmdError::JsonParseTemplateError(format!("Failed to parse JSON: {}. Check if JSON template is an object and not an array.", e))
+            }).unwrap();
+
+            rooms.push(room);
+        }
+        dbg!(rooms.clone());
+        rooms
     }
 }

@@ -147,8 +147,19 @@ async fn main() {
             source,
             classification,
         } => create_room(term, source, classification, password_auth).await,
-        DcCmdCommand::ImportRooms { source, path } => {
-            import_and_create_room_structure(term, source, path, password_auth).await
+        DcCmdCommand::ImportRooms {
+            source,
+            json_path,
+            template_filler_path,
+        } => {
+            import_and_create_room_structure(
+                term,
+                source,
+                json_path,
+                template_filler_path,
+                password_auth,
+            )
+            .await
         }
 
         DcCmdCommand::Rm { source, recursive } => {
