@@ -1,5 +1,3 @@
-use std::fs::File;
-
 use console::Term;
 use csv::Reader;
 use dco3::nodes::{
@@ -10,7 +8,9 @@ use dco3::{auth::Connected, Dracoon};
 use dco3::{Groups, Rooms, Users};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
-use tera::{Context, Tera};
+use std::collections::HashMap;
+use std::fs::File;
+
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
 
@@ -98,6 +98,25 @@ pub struct Room {
     pub classification: Option<u8>,
     pub policies: Option<RoomPolicies>,
     pub sub_rooms: Option<Vec<Room>>,
+}
+
+impl Default for Room {
+    fn default() -> Self {
+        Room {
+            name: String::new(),
+            recycle_bin_retention_period: None,
+            quota: None,
+            inherit_permissions: None,
+            admin_ids: None,
+            admin_group_ids: None,
+            user_permissions: None,
+            group_permissions: None,
+            new_group_member_acceptance: None,
+            classification: None,
+            policies: None,
+            sub_rooms: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -670,9 +689,17 @@ impl RoomImport {
         })
     }
 
+    fn parse_group_member_acceptance(field: &str) -> Option<GroupMemberAcceptance> {
+        match field {
+            "autoallow" => Some(GroupMemberAcceptance::AutoAllow),
+            "pending" => Some(GroupMemberAcceptance::Pending),
+            _ => None,
+        }
+    }
+
     fn fill_template(
         template_filler_path: String,
-        template_content: String,
+        mut template_content: String,
         term: Term,
     ) -> Vec<Room> {
         let file = File::open(template_filler_path).unwrap();
@@ -680,30 +707,110 @@ impl RoomImport {
 
         let headers = csv_data.headers().unwrap().clone();
 
-        let mut rooms = Vec::new();
+        // Find the indexes of the columns dynamically
+        let name_index = headers.iter().position(|h| h == "name");
+        let user_id_index = headers.iter().position(|h| h == "user_id");
+        let user_permissions_index = headers.iter().position(|h| h == "user_permissions");
+        let group_id_index = headers.iter().position(|h| h == "group_id");
+        let new_group_member_acceptance_index = headers
+            .iter()
+            .position(|h| h == "new_group_member_acceptance");
+        let group_permissions_index = headers.iter().position(|h| h == "group_permissions");
+
+        let mut rooms_map: HashMap<String, Room> = HashMap::new();
 
         for result in csv_data.records() {
             let record = result.unwrap();
 
-            let mut context = Context::new();
+            let name = name_index
+                .and_then(|idx| record.get(idx))
+                .unwrap_or("")
+                .to_string();
+            let user_id: Option<u64> = user_id_index
+                .and_then(|idx| record.get(idx))
+                .and_then(|s| s.parse().ok());
+            let user_permissions: Option<NodePermissions> = user_permissions_index
+                .and_then(|idx| record.get(idx))
+                .and_then(|s| serde_json::from_str(s).ok());
+            let group_id: Option<u64> = group_id_index
+                .and_then(|idx| record.get(idx))
+                .and_then(|s| s.parse().ok());
+            let new_group_member_acceptance: Option<GroupMemberAcceptance> =
+                new_group_member_acceptance_index
+                    .and_then(|idx| record.get(idx))
+                    .and_then(|s| Self::parse_group_member_acceptance(s));
+            let group_permissions: Option<NodePermissions> = group_permissions_index
+                .and_then(|idx| record.get(idx))
+                .and_then(|s| serde_json::from_str(s).ok());
 
-            for (i, header) in headers.iter().enumerate() {
-                if let Some(value) = record.get(i) {
-                    context.insert(header, value);
+            let room = rooms_map.entry(name.clone()).or_insert_with(|| Room {
+                name: name.clone(),
+                ..Default::default()
+            });
+
+            if let Some(uid) = user_id {
+                if let Some(uperm) = user_permissions {
+                    let user_permission = UserRoomPermission {
+                        id: uid,
+                        permissions: uperm,
+                    };
+
+                    room.user_permissions
+                        .get_or_insert_with(Vec::new)
+                        .push(user_permission);
                 }
             }
 
-            let tera = Tera::one_off(&template_content, &context, true).unwrap();
+            if let Some(gid) = group_id {
+                if let Some(gperm) = group_permissions {
+                    let group_permission = GroupRoomPermission {
+                        id: gid,
+                        new_group_member_acceptance: new_group_member_acceptance.clone(),
+                        permissions: gperm,
+                    };
 
+                    room.group_permissions
+                        .get_or_insert_with(Vec::new)
+                        .push(group_permission);
+                }
+            }
+        }
+
+        let mut rooms = Vec::new();
+
+        for (_, room) in rooms_map {
+            let mut template_content = template_content.clone();
+            template_content = template_content.replace(
+                "\"{{ name }}\"",
+                serde_json::to_string(&room.name).unwrap().as_str(),
+            );
+
+            if let Some(ref user_permissions) = room.user_permissions {
+                template_content = template_content.replace(
+                    // escape " to prevent JSON parsing errors"
+                    "\"{{ userPermissions }}\"",
+                    serde_json::to_string(user_permissions).unwrap().as_str(),
+                );
+            }
+            if let Some(ref group_permissions) = room.group_permissions {
+                template_content = template_content.replace(
+                    "\"{{ groupPermissions }}\"",
+                    serde_json::to_string(group_permissions)
+                        .unwrap()
+                        .to_owned()
+                        .as_str(),
+                );
+            }
+            dbg!(template_content.clone());
             // Deserialize the JSON string to a Room struct
-            let room: Room = serde_json::from_str(&tera.as_str()).map_err(|e| {
-                error!("Failed to parse JSON: {}. Check if JSON template is an object and not an array.", e);
-                DcCmdError::JsonParseTemplateError(format!("Failed to parse JSON: {}. Check if JSON template is an object and not an array.", e))
+            let filled_room: Room = serde_json::from_str(&template_content.as_str()).map_err(|e| {
+                eprintln!("Failed to parse JSON: {}. Check if JSON template is an object and not an array.", e);
+                e
             }).unwrap();
 
-            rooms.push(room);
+            rooms.push(filled_room);
         }
-        dbg!(rooms.clone());
+
         rooms
     }
 }

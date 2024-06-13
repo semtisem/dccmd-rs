@@ -44,4 +44,3 @@ csv = "1"
 # credentials
 keyring = "2"
 itertools = "0.12.1"
-tera = "1.20.0"
