@@ -770,7 +770,6 @@ impl RoomImport {
                         .as_str(),
                 );
             }
-            dbg!(template_content.clone());
             // Deserialize the JSON string to a Room struct
             let filled_room: Room = serde_json::from_str(&template_content.as_str()).map_err(|e| {
                 eprintln!("Failed to parse JSON: {}. Check if JSON template is an object and not an array.", e);
