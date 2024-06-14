@@ -216,11 +216,6 @@ impl UpdateTasksChannel {
                 Ok(_) => {
                     progress_bar.inc(1);
                     debug!("Updated group permissions for room: {}", room_id.clone().0);
-                    term.write_line(&std::format!(
-                        "Updated group permissions for room: {}",
-                        room_id.clone().0
-                    ))
-                    .expect("Error writing message to terminal.");
                 }
                 Err(e) => {
                     error!("Error updating group permissions for room: {}", e);
@@ -474,19 +469,38 @@ impl RoomImport {
         dracoon: &Dracoon<Connected>,
         term: Term,
     ) -> Result<Self, DcCmdError> {
+        let room_struct =
+            Self::read_and_parse_room_data(path, template_filler_path, dracoon, term.clone())?;
+
+        Ok(Self::analyize_and_validate_room_import_data(term, room_struct, dracoon).await?)
+    }
+
+    fn read_and_parse_room_data(
+        path: String,
+        template_filler_path: Option<String>,
+        dracoon: &Dracoon<Connected>,
+        term: Term,
+    ) -> Result<Vec<Room>, DcCmdError> {
         let data = std::fs::read_to_string(&path).map_err(|e| {
             error!("Failed to read file: {}", e);
             DcCmdError::IoError
         })?;
 
-        let room_struct: Vec<Room> = match template_filler_path {
-            Some(template_filler_path) => {
-                Self::fill_template(template_filler_path, data, term.clone())
-            }
-            None => serde_json::from_str(&data).expect("JSON does not have correct format."),
-        };
+        match template_filler_path {
+            Some(template_filler_path) => Ok(Self::fill_template(
+                template_filler_path,
+                data,
+                term.clone(),
+            )),
+            None => Ok(serde_json::from_str(&data).expect("JSON does not have correct format.")),
+        }
+    }
 
-        // might want to collect errors and return them all at once to fix multiple issues at once
+    async fn analyize_and_validate_room_import_data(
+        term: Term,
+        room_struct: Vec<Room>,
+        dracoon: &Dracoon<Connected>,
+    ) -> Result<RoomImport, DcCmdError> {
         info!("Validating JSON file.");
         term.write_line(&std::format!("Validating JSON file."))
             .expect("Error writing message to terminal.");
@@ -495,8 +509,6 @@ impl RoomImport {
             room.check_illegal_characters_in_room_name()?;
             room.check_conflicting_permissions()?;
         }
-
-        let total_room_count = Self::get_total_rooms(room_struct.clone());
 
         let virus_protection_policy_found =
             Self::check_if_virus_protection_is_some(room_struct.clone());
@@ -508,6 +520,8 @@ impl RoomImport {
             "Checking if user and group ids in JSON file exist."
         ))
         .expect("Error writing message to terminal.");
+
+        let total_room_count = Self::get_total_rooms(room_struct.clone());
 
         Self::check_user_and_group_existence(
             Self {
