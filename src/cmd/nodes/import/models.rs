@@ -359,38 +359,57 @@ unsafe impl Send for UpdateTasksChannel {
 pub struct RoomId(pub u64);
 
 impl Room {
-    fn check_all_rooms_have_admin(&self) -> Result<(), DcCmdError> {
-        let has_admin = self.admin_ids.is_some() && !self.admin_ids.as_ref().unwrap().is_empty()
-            || self.admin_group_ids.is_some() && !self.admin_group_ids.as_ref().unwrap().is_empty()
-            || self
-                .user_permissions
-                .as_ref()
-                .map(|perms| perms.iter().any(|user| user.permissions.manage))
-                .unwrap_or(false)
-            || self
-                .group_permissions
-                .as_ref()
-                .map(|perms| perms.iter().any(|group| group.permissions.manage))
-                .unwrap_or(false)
-            || self.inherit_permissions.unwrap_or(false);
-
-        if !has_admin {
-            return Err(DcCmdError::ImportedRoomHasNoAdmin(format!(
-                "Room '{}' does not have an admin and inheritance is disabled.",
-                self.name
-            )));
-        }
+    fn check_self_and_sub_rooms_for_admin(&self) -> Result<(), DcCmdError> {
+        self.has_admin()?;
 
         if let Some(sub_rooms) = &self.sub_rooms {
             sub_rooms
                 .iter()
-                .try_for_each(|room| room.check_all_rooms_have_admin())?;
+                .try_for_each(|room| room.check_self_and_sub_rooms_for_admin())?;
         }
 
         Ok(())
     }
 
-    fn check_conflicting_permissions(&self) -> Result<(), DcCmdError> {
+    fn has_admin(&self) -> Result<(), DcCmdError> {
+        let has_admin = self.has_admin_ids()
+            || self.has_group_admin_ids()
+            || self.has_user_permissions_with_manage()
+            || self.has_group_permissions_with_manage()
+            || self.inherit_permissions.unwrap_or(false);
+
+        match has_admin {
+            true => Ok(()),
+            false => Err(DcCmdError::ImportedRoomHasNoAdmin(format!(
+                "Room '{}' does not have an admin.",
+                self.name
+            ))),
+        }
+    }
+
+    fn has_admin_ids(&self) -> bool {
+        self.admin_ids.is_some() && !self.admin_ids.as_ref().unwrap().is_empty()
+    }
+
+    fn has_group_admin_ids(&self) -> bool {
+        self.admin_group_ids.is_some() && !self.admin_group_ids.as_ref().unwrap().is_empty()
+    }
+
+    fn has_user_permissions_with_manage(&self) -> bool {
+        self.user_permissions
+            .as_ref()
+            .map(|perms| perms.iter().any(|user| user.permissions.manage))
+            .unwrap_or(false)
+    }
+
+    fn has_group_permissions_with_manage(&self) -> bool {
+        self.group_permissions
+            .as_ref()
+            .map(|perms| perms.iter().any(|group| group.permissions.manage))
+            .unwrap_or(false)
+    }
+
+    fn check_self_and_sub_rooms_for_conflicting_permissions(&self) -> Result<(), DcCmdError> {
         // check if one of the admin ids is within the user permissions and has not manage permission
         if let Some(admin_ids) = &self.admin_ids {
             if let Some(user_permissions) = &self.user_permissions {
@@ -414,24 +433,41 @@ impl Room {
         if let Some(sub_rooms) = &self.sub_rooms {
             sub_rooms
                 .iter()
-                .try_for_each(|room| room.check_conflicting_permissions())?;
+                .try_for_each(|room| room.check_self_and_sub_rooms_for_conflicting_permissions())?;
         }
 
         Ok(())
     }
 
-    fn check_illegal_characters_in_room_name(&self) -> Result<(), DcCmdError> {
-        let illegal_characters = ["\\", "/", ":", "*", "?", "\"", "<", ">", "|"];
-        if illegal_characters
-            .iter()
-            .any(|character| self.name.contains(character))
-        {
+    fn check_self_and_sub_rooms_for_illegal_room_names(&self) -> Result<(), DcCmdError> {
+        self.check_for_illegal_characters()?;
+        self.check_room_name_too_long()?;
+        self.check_room_name_begins_with_hyphen()?;
+        self.check_room_name_ends_with_period()?;
+
+        if let Some(sub_rooms) = &self.sub_rooms {
+            sub_rooms
+                .iter()
+                .try_for_each(|room| room.check_self_and_sub_rooms_for_illegal_room_names())?;
+        }
+
+        Ok(())
+    }
+
+    fn check_for_illegal_characters(&self) -> Result<(), DcCmdError> {
+        let illegal_characters = vec!['/', '\\', '?', '%', '*', ':', '|', '"', '<', '>', '.'];
+
+        if self.name.chars().any(|c| illegal_characters.contains(&c)) {
             return Err(DcCmdError::IllegalRoomName(format!(
-                "Room '{}' contains illegal character.",
+                "Room '{}' name contains illegal character.",
                 self.name
             )));
         }
 
+        Ok(())
+    }
+
+    fn check_room_name_too_long(&self) -> Result<(), DcCmdError> {
         if self.name.len() > 255 {
             return Err(DcCmdError::IllegalRoomName(format!(
                 "Room '{}' name is too long.",
@@ -439,6 +475,10 @@ impl Room {
             )));
         }
 
+        Ok(())
+    }
+
+    fn check_room_name_begins_with_hyphen(&self) -> Result<(), DcCmdError> {
         if self.name.starts_with('-') {
             return Err(DcCmdError::IllegalRoomName(format!(
                 "Room '{}' name begins with a hyphen.",
@@ -446,17 +486,15 @@ impl Room {
             )));
         }
 
+        Ok(())
+    }
+
+    fn check_room_name_ends_with_period(&self) -> Result<(), DcCmdError> {
         if self.name.ends_with('.') {
             return Err(DcCmdError::IllegalRoomName(format!(
                 "Room '{}' name ends with a period.",
                 self.name
             )));
-        }
-
-        if let Some(sub_rooms) = &self.sub_rooms {
-            sub_rooms
-                .iter()
-                .try_for_each(|room| room.check_illegal_characters_in_room_name())?;
         }
 
         Ok(())
@@ -506,9 +544,9 @@ impl RoomImport {
         term.write_line(&std::format!("Validating JSON file."))
             .expect("Error writing message to terminal.");
         for room in &room_struct {
-            room.check_all_rooms_have_admin()?;
-            room.check_illegal_characters_in_room_name()?;
-            room.check_conflicting_permissions()?;
+            room.check_self_and_sub_rooms_for_admin()?;
+            room.check_self_and_sub_rooms_for_illegal_room_names()?;
+            room.check_self_and_sub_rooms_for_conflicting_permissions()?;
         }
 
         let virus_protection_policy_found =
@@ -680,10 +718,19 @@ impl RoomImport {
     fn read_file_and_construct_room_map(
         template_filler_path: String,
     ) -> Result<HashMap<String, Room>, DcCmdError> {
-        let file = File::open(template_filler_path).unwrap();
+        let file = File::open(template_filler_path).map_err(|e| {
+            error!("Failed to open file: {}", e);
+            DcCmdError::IoError
+        })?;
         let mut csv_data = Reader::from_reader(file);
 
-        let headers = csv_data.headers().unwrap().clone();
+        let headers = csv_data
+            .headers()
+            .map_err(|e| {
+                error!("Failed to read CSV headers: {}", e);
+                DcCmdError::CsvReadHeaders(format!("Failed to read CSV headers: {}", e))
+            })?
+            .clone();
 
         // Find the indexes of the columns dynamically
         let name_index = headers.iter().position(|h| h == "name");
@@ -698,7 +745,10 @@ impl RoomImport {
         let mut rooms_map: HashMap<String, Room> = HashMap::new();
 
         for result in csv_data.records() {
-            let record = result.unwrap();
+            let record = result.map_err(|e| {
+                error!("Failed to read CSV record: {}", e);
+                DcCmdError::CsvReadRecord(format!("Failed to read CSV record: {}", e))
+            })?;
 
             let name = name_index
                 .and_then(|idx| record.get(idx))
@@ -764,23 +814,46 @@ impl RoomImport {
 
         for (_, room) in rooms_map {
             let mut template_content = template_content.clone();
+
             template_content = template_content.replace(
                 "\"{{ name }}\"",
-                serde_json::to_string(&room.name).unwrap().as_str(),
+                serde_json::to_string(&room.name)
+                    .map_err(|e| {
+                        error!("Failed to serialize room name: {}", e);
+                        DcCmdError::SerdeSerializeToString(format!(
+                            "Failed to serialize room name: {}",
+                            e
+                        ))
+                    })?
+                    .as_str(),
             );
 
             if let Some(ref user_permissions) = room.user_permissions {
                 template_content = template_content.replace(
                     // escape " to prevent JSON parsing errors"
                     "\"{{ userPermissions }}\"",
-                    serde_json::to_string(user_permissions).unwrap().as_str(),
+                    serde_json::to_string(user_permissions)
+                        .map_err(|e| {
+                            error!("Failed to serialize user permissions: {}", e);
+                            DcCmdError::SerdeSerializeToString(format!(
+                                "Failed to serialize user permissions: {}",
+                                e
+                            ))
+                        })?
+                        .as_str(),
                 );
             }
             if let Some(ref group_permissions) = room.group_permissions {
                 template_content = template_content.replace(
                     "\"{{ groupPermissions }}\"",
                     serde_json::to_string(group_permissions)
-                        .unwrap()
+                        .map_err(|e| {
+                            error!("Failed to serialize group permissions: {}", e);
+                            DcCmdError::SerdeSerializeToString(format!(
+                                "Failed to serialize group permissions: {}",
+                                e
+                            ))
+                        })?
                         .to_owned()
                         .as_str(),
                 );
@@ -789,7 +862,13 @@ impl RoomImport {
             let filled_room: Room = serde_json::from_str(&template_content.as_str()).map_err(|e| {
                 eprintln!("Failed to parse JSON: {}. Check if JSON template is an object and not an array.", e);
                 e
-            }).unwrap();
+            }).map_err(|e| {
+                error!("Failed to deserialize JSON template: {}", e);
+                DcCmdError::JsonParseTemplate(format!(
+                    "Failed to deserialize JSON template: {}",
+                    e
+                ))
+            })?;
 
             templated_rooms.push(filled_room);
         }

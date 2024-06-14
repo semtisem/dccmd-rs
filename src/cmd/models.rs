@@ -55,7 +55,15 @@ pub enum DcCmdError {
     #[error("Group does not exist")]
     GroupNotFound(String),
     #[error("Parsing JSON template failed")]
-    JsonParseTemplateError(String),
+    JsonParseTemplate(String),
+    #[error("Failed to read csv headers")]
+    CsvReadHeaders(String),
+    #[error("Failed to read csv record")]
+    CsvReadRecord(String),
+    #[error("Failed to serialize to string")]
+    SerdeSerializeToString(String),
+    #[error("Failed to deserialize from string")]
+    SerdeDeserializeFromString(String),
 }
 
 impl From<DracoonClientError> for DcCmdError {
