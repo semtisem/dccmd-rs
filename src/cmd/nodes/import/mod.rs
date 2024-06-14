@@ -18,7 +18,7 @@ use dco3::{
     Dracoon, ListAllParams,
 };
 
-use super::models::{
+use models::{
     GroupRoomPermission, Room, RoomId, RoomImport, RoomPolicies, UpdateTask, UpdateTaskType,
     UpdateTasksChannel, UserRoomPermission,
 };
@@ -28,6 +28,8 @@ use crate::cmd::{
     models::{DcCmdError, PasswordAuth},
     utils::strings::parse_path,
 };
+
+pub mod models;
 
 pub async fn import_and_create_room_structure(
     term: Term,
