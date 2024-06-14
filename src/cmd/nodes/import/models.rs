@@ -10,6 +10,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
+use std::hash::Hash;
 
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
@@ -487,11 +488,11 @@ impl RoomImport {
         })?;
 
         match template_filler_path {
-            Some(template_filler_path) => Ok(Self::fill_template(
+            Some(template_filler_path) => Ok(Self::construct_rooms_from_template_files(
                 template_filler_path,
                 data,
                 term.clone(),
-            )),
+            )?),
             None => Ok(serde_json::from_str(&data).expect("JSON does not have correct format.")),
         }
     }
@@ -666,11 +667,19 @@ impl RoomImport {
         }
     }
 
-    fn fill_template(
+    fn construct_rooms_from_template_files(
         template_filler_path: String,
         template_content: String,
         term: Term,
-    ) -> Vec<Room> {
+    ) -> Result<Vec<Room>, DcCmdError> {
+        let rooms_map = Self::read_file_and_construct_room_map(template_filler_path)?;
+
+        Ok(Self::fill_template_with_data(rooms_map, template_content)?)
+    }
+
+    fn read_file_and_construct_room_map(
+        template_filler_path: String,
+    ) -> Result<HashMap<String, Room>, DcCmdError> {
         let file = File::open(template_filler_path).unwrap();
         let mut csv_data = Reader::from_reader(file);
 
@@ -744,8 +753,14 @@ impl RoomImport {
                 }
             }
         }
+        Ok(rooms_map)
+    }
 
-        let mut rooms = Vec::new();
+    fn fill_template_with_data(
+        rooms_map: HashMap<String, Room>,
+        template_content: String,
+    ) -> Result<Vec<Room>, DcCmdError> {
+        let mut templated_rooms = Vec::new();
 
         for (_, room) in rooms_map {
             let mut template_content = template_content.clone();
@@ -776,9 +791,9 @@ impl RoomImport {
                 e
             }).unwrap();
 
-            rooms.push(filled_room);
+            templated_rooms.push(filled_room);
         }
 
-        rooms
+        Ok(templated_rooms)
     }
 }
