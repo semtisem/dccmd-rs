@@ -5,12 +5,14 @@ use dco3::nodes::{
     RoomUsersAddBatchRequestItem,
 };
 use dco3::{auth::Connected, Dracoon};
-use dco3::{Groups, Rooms, Users};
+use dco3::{system, Groups, Rooms, Users};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::hash::Hash;
+
+use regex::Regex;
 
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
@@ -54,6 +56,15 @@ pub struct Room {
     pub classification: Option<u8>,
     pub policies: Option<RoomPolicies>,
     pub sub_rooms: Option<Vec<Room>>,
+}
+
+struct HeaderIndexes {
+    name_index: Option<usize>,
+    user_id_index: Option<usize>,
+    user_permissions_index: Option<usize>,
+    group_id_index: Option<usize>,
+    new_group_member_acceptance_index: Option<usize>,
+    group_permissions_index: Option<usize>,
 }
 
 impl Default for Room {
@@ -710,37 +721,70 @@ impl RoomImport {
         template_content: String,
         term: Term,
     ) -> Result<Vec<Room>, DcCmdError> {
-        let rooms_map = Self::read_file_and_construct_room_map(template_filler_path)?;
-
+        let tokens = Self::get_template_tokens(&template_content, term.clone())?;
+        let rooms_map = Self::read_file_and_construct_room_map(template_filler_path, tokens)?;
         Ok(Self::fill_template_with_data(rooms_map, template_content)?)
+    }
+
+    fn get_template_tokens(
+        template_content: &String,
+        term: Term,
+    ) -> Result<Vec<String>, DcCmdError> {
+        // write a regex to find all template tokens (characters within {{ and }}) in the template_content
+        // if no tokens are found, return an error
+        // if tokens are found, return the tokens
+
+        let re = Regex::new(r"\{\{(.*?)\}\}").unwrap();
+        let tokens: Vec<String> = re
+            .captures_iter(template_content)
+            .map(|cap| cap[1].trim().to_string())
+            .collect();
+
+        if tokens.is_empty() {
+            error!("No template tokens found in template content.");
+            term.write_line("No template tokens found in template content.")
+                .expect("Error writing message to terminal.");
+            return Err(DcCmdError::NoTemplateTokensFound(
+                "No template tokens found in template content.".to_string(),
+            ));
+        }
+
+        // check if there are other tokens then "name", "userPermissions", "groupPermissions" and throw an error if there are
+        let allowed_tokens = vec!["name", "userPermissions", "groupPermissions"];
+        let invalid_tokens: Vec<String> = tokens
+            .iter()
+            .filter(|token| !allowed_tokens.contains(&token.as_str()))
+            .cloned()
+            .collect();
+
+        if !invalid_tokens.is_empty() {
+            error!(
+                "Invalid template tokens found in template content: {:?}. Only '{{ name }}', '{{ userPermissions }}' and '{{ groupPermissions }}' are allowed.",
+                invalid_tokens
+            );
+            return Err(DcCmdError::InvalidTemplateTokens(format!(
+                "Invalid template tokens found in template content: {:?}. Only '{{ name }}', '{{ userPermissions }}' and '{{ groupPermissions }}' are allowed.",
+                invalid_tokens
+            )));
+        }
+
+        Ok(tokens)
     }
 
     fn read_file_and_construct_room_map(
         template_filler_path: String,
+        tokens: Vec<String>,
     ) -> Result<HashMap<String, Room>, DcCmdError> {
         let file = File::open(template_filler_path).map_err(|e| {
             error!("Failed to open file: {}", e);
             DcCmdError::IoError
         })?;
+
         let mut csv_data = Reader::from_reader(file);
 
-        let headers = csv_data
-            .headers()
-            .map_err(|e| {
-                error!("Failed to read CSV headers: {}", e);
-                DcCmdError::CsvReadHeaders(format!("Failed to read CSV headers: {}", e))
-            })?
-            .clone();
-
         // Find the indexes of the columns dynamically
-        let name_index = headers.iter().position(|h| h == "name");
-        let user_id_index = headers.iter().position(|h| h == "user_id");
-        let user_permissions_index = headers.iter().position(|h| h == "user_permissions");
-        let group_id_index = headers.iter().position(|h| h == "group_id");
-        let new_group_member_acceptance_index = headers
-            .iter()
-            .position(|h| h == "new_group_member_acceptance");
-        let group_permissions_index = headers.iter().position(|h| h == "group_permissions");
+        let header_indexes = Self::get_header_indexes(&mut csv_data)?;
+        Self::validate_tokens_against_headers(&header_indexes, tokens)?;
 
         let mut rooms_map: HashMap<String, Room> = HashMap::new();
 
@@ -750,24 +794,29 @@ impl RoomImport {
                 DcCmdError::CsvReadRecord(format!("Failed to read CSV record: {}", e))
             })?;
 
-            let name = name_index
+            let name = header_indexes
+                .name_index
                 .and_then(|idx| record.get(idx))
                 .unwrap_or("")
                 .to_string();
-            let user_id: Option<u64> = user_id_index
+            let user_id: Option<u64> = header_indexes
+                .user_id_index
                 .and_then(|idx| record.get(idx))
                 .and_then(|s| s.parse().ok());
-            let user_permissions: Option<NodePermissions> = user_permissions_index
+            let user_permissions: Option<NodePermissions> = header_indexes
+                .user_permissions_index
                 .and_then(|idx| record.get(idx))
                 .and_then(|s| serde_json::from_str(s).ok());
-            let group_id: Option<u64> = group_id_index
+            let group_id: Option<u64> = header_indexes
+                .group_id_index
                 .and_then(|idx| record.get(idx))
                 .and_then(|s| s.parse().ok());
-            let new_group_member_acceptance: Option<GroupMemberAcceptance> =
-                new_group_member_acceptance_index
-                    .and_then(|idx| record.get(idx))
-                    .and_then(|s| Self::parse_group_member_acceptance(s));
-            let group_permissions: Option<NodePermissions> = group_permissions_index
+            let new_group_member_acceptance: Option<GroupMemberAcceptance> = header_indexes
+                .new_group_member_acceptance_index
+                .and_then(|idx| record.get(idx))
+                .and_then(|s| Self::parse_group_member_acceptance(s));
+            let group_permissions: Option<NodePermissions> = header_indexes
+                .group_permissions_index
                 .and_then(|idx| record.get(idx))
                 .and_then(|s| serde_json::from_str(s).ok());
 
@@ -804,6 +853,88 @@ impl RoomImport {
             }
         }
         Ok(rooms_map)
+    }
+
+    fn get_header_indexes(csv_data: &mut Reader<File>) -> Result<HeaderIndexes, DcCmdError> {
+        let headers = csv_data
+            .headers()
+            .map_err(|e| {
+                error!("Failed to read CSV headers: {}", e);
+                DcCmdError::CsvReadHeaders(format!("Failed to read CSV headers: {}", e))
+            })?
+            .clone();
+
+        let name_index = headers.iter().position(|h| h == "name");
+
+        if name_index.is_none() {
+            error!("No 'name' column found in CSV file.");
+            return Err(DcCmdError::CsvReadHeaders(
+                "No 'name' column found in CSV file.".to_string(),
+            ));
+        }
+
+        let user_id_index = headers.iter().position(|h| h == "userId");
+        let user_permissions_index = headers.iter().position(|h| h == "userPermissions");
+
+        if user_id_index.is_some() && user_permissions_index.is_none() {
+            error!("'userId' column found but no 'userPermissions' column found in CSV file.");
+            return Err(DcCmdError::CsvReadHeaders(
+                "'userId' column found but no 'userPermissions' column found in CSV file."
+                    .to_string(),
+            ));
+        }
+
+        let group_id_index = headers.iter().position(|h| h == "groupId");
+        let new_group_member_acceptance_index = headers
+            .iter()
+            .position(|h| h == "new_group_member_acceptance");
+        let group_permissions_index = headers.iter().position(|h| h == "groupPermissions");
+
+        if group_id_index.is_some() && group_permissions_index.is_none() {
+            error!("'groupId' column found but no 'groupPermissions' column found in CSV file.");
+            return Err(DcCmdError::CsvReadHeaders(
+                "'groupId' column found but no 'groupPermissions' column found in CSV file."
+                    .to_string(),
+            ));
+        }
+
+        Ok(HeaderIndexes {
+            name_index,
+            user_id_index,
+            user_permissions_index,
+            group_id_index,
+            new_group_member_acceptance_index,
+            group_permissions_index,
+        })
+    }
+
+    fn validate_tokens_against_headers(
+        header_indexes: &HeaderIndexes,
+        tokens: Vec<String>,
+    ) -> Result<(), DcCmdError> {
+        if tokens.iter().any(|token| token == "userPermission") {
+            if header_indexes.user_id_index.is_none()
+                || header_indexes.user_permissions_index.is_none()
+            {
+                error!("'userPermissions' token found but no 'userId' or 'userPermissions' column found in CSV file.");
+                return Err(DcCmdError::CsvReadHeaders(
+                    "'userPermissions' token found but no 'userId' or 'userPermissions' column found in CSV file.".to_string(),
+                ));
+            }
+        }
+
+        if tokens.iter().any(|token| token == "groupPermissions") {
+            if header_indexes.group_id_index.is_none()
+                || header_indexes.group_permissions_index.is_none()
+            {
+                error!("'groupPermissions' token found in template but no 'groupId' or 'groupPermissions' column found in CSV file.");
+                return Err(DcCmdError::CsvReadHeaders(
+                    "'groupPermissions' token found in template but no 'groupId' or 'groupPermissions' column found in CSV file.".to_string(),
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     fn fill_template_with_data(

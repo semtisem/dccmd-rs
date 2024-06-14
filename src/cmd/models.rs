@@ -64,6 +64,12 @@ pub enum DcCmdError {
     SerdeSerializeToString(String),
     #[error("Failed to deserialize from string")]
     SerdeDeserializeFromString(String),
+    #[error("No template tokens found")]
+    NoTemplateTokensFound(String),
+    #[error("Template token conflict")]
+    TemplateTokenConflict(String),
+    #[error("Invalid template tokens")]
+    InvalidTemplateTokens(String),
 }
 
 impl From<DracoonClientError> for DcCmdError {
