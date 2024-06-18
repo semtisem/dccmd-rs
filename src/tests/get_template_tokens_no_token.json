@@ -1,0 +1,10 @@
+{
+  "name": "test",
+  "adminIds": [2],
+  "subRooms": [
+    {
+      "name": "sub",
+      "adminIds": [2]
+    }
+  ]
+}

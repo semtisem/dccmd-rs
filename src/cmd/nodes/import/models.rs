@@ -1007,3 +1007,174 @@ impl RoomImport {
         Ok(templated_rooms)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_template_tokens() {
+        let template_content = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tests/get_template_tokens_all_tokens.json"
+        ));
+
+        let tokens =
+            RoomImport::get_template_tokens(&template_content.to_string(), console::Term::stdout())
+                .expect("Failed to get template tokens.");
+
+        assert_eq!(tokens, vec!["name", "userPermissions", "groupPermissions"]);
+    }
+
+    #[test]
+    fn test_get_template_tokens_wrong_token() {
+        let template_content = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tests/get_template_tokens_wrong_token.json"
+        ));
+
+        let tokens =
+            RoomImport::get_template_tokens(&template_content.to_string(), console::Term::stdout());
+
+        assert!(tokens.is_err());
+        assert!(matches!(
+            tokens.unwrap_err(),
+            DcCmdError::InvalidTemplateTokens(_)
+        ));
+    }
+
+    #[test]
+    fn test_get_template_tokens_no_token() {
+        let template_content = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tests/get_template_tokens_no_token.json"
+        ));
+
+        let tokens =
+            RoomImport::get_template_tokens(&template_content.to_string(), console::Term::stdout());
+
+        assert!(tokens.is_err());
+        assert!(matches!(
+            tokens.unwrap_err(),
+            DcCmdError::NoTemplateTokensFound(_)
+        ));
+    }
+
+    #[test]
+    fn test_fill_template_with_data() {
+        let template_filler_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tests/fill_template_with_data.csv"
+        );
+
+        let template_content = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tests/fill_template_with_data_template.json"
+        ));
+
+        let tokens =
+            RoomImport::get_template_tokens(&template_content.to_string(), console::Term::stdout())
+                .expect("Failed to get template tokens.");
+
+        println!("{:?}", template_filler_path);
+
+        let rooms_map =
+            RoomImport::read_file_and_construct_room_map(template_filler_path.to_string(), tokens)
+                .expect("Failed to read file and construct room map.");
+
+        let mut filled_rooms =
+            RoomImport::fill_template_with_data(rooms_map, template_content.to_string())
+                .expect("Failed to fill template with data.");
+
+        filled_rooms.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let room_1 = filled_rooms[0].clone();
+
+        assert_eq!(filled_rooms.len(), 3);
+        assert_eq!(room_1.clone().name, "test");
+        assert_eq!(room_1.clone().user_permissions.unwrap()[0].id, 2);
+        assert_eq!(
+            room_1.clone().user_permissions.unwrap()[0]
+                .permissions
+                .manage,
+            true
+        );
+        assert_eq!(room_1.clone().group_permissions.unwrap()[0].id, 4);
+        assert_eq!(
+            room_1.clone().group_permissions.unwrap()[0]
+                .permissions
+                .manage,
+            true
+        );
+        assert_eq!(
+            room_1.clone().group_permissions.unwrap()[0].new_group_member_acceptance,
+            Some(GroupMemberAcceptance::AutoAllow)
+        );
+        assert_eq!(room_1.clone().user_permissions.unwrap().len(), 2);
+
+        assert_eq!(filled_rooms[1].name, "test_2");
+        assert_eq!(filled_rooms[2].name, "test_3");
+    }
+
+    #[test]
+    fn test_read_file_and_construct_room_map() {
+        let template_filler_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tests/fill_template_with_data.csv"
+        );
+
+        let template_content = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tests/fill_template_with_data_template.json"
+        ));
+
+        let tokens =
+            RoomImport::get_template_tokens(&template_content.to_string(), console::Term::stdout())
+                .expect("Failed to get template tokens.");
+
+        let rooms_map =
+            RoomImport::read_file_and_construct_room_map(template_filler_path.to_string(), tokens)
+                .expect("Failed to read file and construct room map.");
+
+        let room_1 = rooms_map.get("test").unwrap().clone();
+        assert!(room_1.name == "test");
+        assert!(room_1.user_permissions.is_some());
+        assert!(room_1.group_permissions.is_some());
+        assert!(room_1.user_permissions.unwrap().len() == 2);
+        assert!(room_1.group_permissions.clone().unwrap().len() == 2);
+        assert!(&room_1.group_permissions.clone().unwrap()[0]
+            .new_group_member_acceptance
+            .is_some());
+        assert!(
+            room_1.group_permissions.clone().unwrap()[0]
+                .new_group_member_acceptance
+                .clone()
+                .unwrap()
+                == GroupMemberAcceptance::AutoAllow
+        );
+        let room_2 = rooms_map.get("test_2").unwrap().clone();
+        assert!(room_2.name == "test_2");
+    }
+
+    #[test]
+    fn test_get_header_indexes() {
+        let template_filler_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tests/fill_template_with_data.csv"
+        );
+
+        let file = File::open(template_filler_path).expect("Failed to open file.");
+
+        let mut csv_data = Reader::from_reader(file);
+
+        let header_indexes =
+            RoomImport::get_header_indexes(&mut csv_data).expect("Failed to get header indexes.");
+
+        assert_eq!(header_indexes.name_index, Some(0));
+        assert_eq!(header_indexes.user_id_index, Some(1));
+        assert_eq!(header_indexes.user_permissions_index, Some(2));
+        assert_eq!(header_indexes.group_id_index, Some(3));
+        assert_eq!(header_indexes.new_group_member_acceptance_index, Some(4));
+        assert_eq!(header_indexes.group_permissions_index, Some(5));
+    }
+}
