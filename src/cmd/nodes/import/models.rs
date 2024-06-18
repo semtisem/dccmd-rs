@@ -885,9 +885,8 @@ impl RoomImport {
         }
 
         let group_id_index = headers.iter().position(|h| h == "groupId");
-        let new_group_member_acceptance_index = headers
-            .iter()
-            .position(|h| h == "new_group_member_acceptance");
+        let new_group_member_acceptance_index =
+            headers.iter().position(|h| h == "newGroupMemberAcceptance");
         let group_permissions_index = headers.iter().position(|h| h == "groupPermissions");
 
         if group_id_index.is_some() && group_permissions_index.is_none() {
