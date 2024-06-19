@@ -5,7 +5,7 @@ use dco3::nodes::{
     RoomUsersAddBatchRequestItem,
 };
 use dco3::{auth::Connected, Dracoon};
-use dco3::{system, Groups, Rooms, Users};
+use dco3::{Groups, Rooms, Users};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -41,7 +41,7 @@ pub struct RoomPolicies {
     pub is_virus_protection_enabled: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)] // This will make the compiler error if there are unknown fields in the JSON which could be typos and thus result in None values
 pub struct Room {
     pub name: String,
@@ -67,25 +67,6 @@ struct HeaderIndexes {
     group_permissions_index: Option<usize>,
 }
 
-impl Default for Room {
-    fn default() -> Self {
-        Room {
-            name: String::new(),
-            recycle_bin_retention_period: None,
-            quota: None,
-            inherit_permissions: None,
-            admin_ids: None,
-            admin_group_ids: None,
-            user_permissions: None,
-            group_permissions: None,
-            new_group_member_acceptance: None,
-            classification: None,
-            policies: None,
-            sub_rooms: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoomImport {
     pub total_room_count: u64,
@@ -93,12 +74,12 @@ pub struct RoomImport {
 }
 
 pub struct UpdateTask {
-    pub(crate) task_type: UpdateTaskType,
+    pub(crate) task_type: UpdateRoomTaskType,
 }
-pub enum UpdateTaskType {
-    RoomGroup(RoomId, Vec<RoomGroupsAddBatchRequestItem>),
-    RoomUser(RoomId, Vec<RoomUsersAddBatchRequestItem>),
-    RoomPolicies(RoomId, RoomPoliciesRequest),
+pub enum UpdateRoomTaskType {
+    Group(RoomId, Vec<RoomGroupsAddBatchRequestItem>),
+    User(RoomId, Vec<RoomUsersAddBatchRequestItem>),
+    Policies(RoomId, RoomPoliciesRequest),
 }
 
 pub struct UpdateTasksChannel {
@@ -142,40 +123,40 @@ impl UpdateTasksChannel {
         self.tx.clone()
     }
 
-    pub fn get_stats(&self, term: Term) -> usize {
+    pub fn get_stats(&self) -> usize {
         debug!("Current capacity: {}", self.tx.capacity());
         self.tx.capacity()
     }
 
     pub async fn collect_than_complete(&mut self, term: Term, dracoon: &Dracoon<Connected>) {
-        self.collect_tasks(term.clone()).await;
+        self.collect_tasks().await;
 
         // Shutdown the reciever
-        self.shutdown(term.clone());
+        self.shutdown();
 
         self.complete_tasks(dracoon, term).await;
     }
 
     /// pub only for testing
-    pub async fn collect_tasks(&mut self, term: Term) {
+    pub async fn collect_tasks(&mut self) {
         if self.tx.capacity() == CAPACITY {
             debug!("No tasks to collect.");
             return;
         }
 
         while let Some(task) = self.rx.recv().await {
-            let capacity = self.get_stats(term.clone());
+            let capacity = self.get_stats();
 
             match task.task_type {
-                UpdateTaskType::RoomGroup(room_id, groups) => {
+                UpdateRoomTaskType::Group(room_id, groups) => {
                     debug!("Recieved RoomGroup task for room: {}", room_id.0);
                     self.room_group_tasks.0.push((room_id, groups));
                 }
-                UpdateTaskType::RoomUser(room_id, users) => {
+                UpdateRoomTaskType::User(room_id, users) => {
                     debug!("Recieved RoomUser task for room: {}", room_id.0);
                     self.room_user_tasks.0.push((room_id, users));
                 }
-                UpdateTaskType::RoomPolicies(room_id, policies) => {
+                UpdateRoomTaskType::Policies(room_id, policies) => {
                     debug!("Recieved RoomPolicies task for room: {}", room_id.0);
                     self.room_policies_tasks.0.push((room_id, policies));
                 }
@@ -352,11 +333,13 @@ impl UpdateTasksChannel {
         }
     }
 
-    pub fn shutdown(&mut self, term: Term) {
+    pub fn shutdown(&mut self) {
         debug!("Shutting down reciever for UpdateTasks.");
         self.rx.close();
     }
 
+    // used for testing
+    #[allow(unused)]
     pub fn get_policy_task_count(&self) -> usize {
         self.room_policies_tasks.0.len()
     }
@@ -466,7 +449,7 @@ impl Room {
     }
 
     fn check_for_illegal_characters(&self) -> Result<(), DcCmdError> {
-        let illegal_characters = vec!['/', '\\', '?', '%', '*', ':', '|', '"', '<', '>', '.'];
+        let illegal_characters = ['/', '\\', '?', '%', '*', ':', '|', '"', '<', '>', '.'];
 
         if self.name.chars().any(|c| illegal_characters.contains(&c)) {
             return Err(DcCmdError::IllegalRoomName(format!(
@@ -519,19 +502,17 @@ impl RoomImport {
         dracoon: &Dracoon<Connected>,
         term: Term,
     ) -> Result<Self, DcCmdError> {
-        let room_struct =
-            Self::read_and_parse_room_data(path, template_filler_path, dracoon, term.clone())?;
+        let room_struct = Self::read_and_parse_room_data(path, template_filler_path, term.clone())?;
 
-        Ok(Self::analyize_and_validate_room_import_data(term, room_struct, dracoon).await?)
+        Self::analyize_and_validate_room_import_data(term, room_struct, dracoon).await
     }
 
     fn read_and_parse_room_data(
         path: String,
         template_filler_path: Option<String>,
-        dracoon: &Dracoon<Connected>,
         term: Term,
     ) -> Result<Vec<Room>, DcCmdError> {
-        let data = std::fs::read_to_string(&path).map_err(|e| {
+        let data = std::fs::read_to_string(path).map_err(|e| {
             error!("Failed to read file: {}", e);
             DcCmdError::IoError
         })?;
@@ -552,7 +533,7 @@ impl RoomImport {
         dracoon: &Dracoon<Connected>,
     ) -> Result<RoomImport, DcCmdError> {
         info!("Validating JSON file.");
-        term.write_line(&std::format!("Validating JSON file."))
+        term.write_line("Validating JSON file.")
             .expect("Error writing message to terminal.");
         for room in &room_struct {
             room.check_self_and_sub_rooms_for_admin()?;
@@ -560,16 +541,13 @@ impl RoomImport {
             room.check_self_and_sub_rooms_for_conflicting_permissions()?;
         }
 
-        let virus_protection_policy_found =
-            Self::check_if_virus_protection_is_some(room_struct.clone());
+        Self::check_if_virus_protection_is_some(room_struct.clone());
 
         // todo impl function in dco3 and check if virus protection is enabled when virus_protection_policy_found is true
 
         info!("Checking if user and group ids in JSON file exist.");
-        term.write_line(&std::format!(
-            "Checking if user and group ids in JSON file exist."
-        ))
-        .expect("Error writing message to terminal.");
+        term.write_line("Checking if user and group ids in JSON file exist.")
+            .expect("Error writing message to terminal.");
 
         let total_room_count = Self::get_total_rooms(room_struct.clone());
 
@@ -583,7 +561,7 @@ impl RoomImport {
         .await?;
 
         info!("Checks completed successfully.");
-        term.write_line(&std::format!("Checks completed successfully."))
+        term.write_line("Checks completed successfully.")
             .expect("Error writing message to terminal.");
 
         Ok(Self {
@@ -621,7 +599,7 @@ impl RoomImport {
                 }
             }
             if let Some(sub_rooms) = &room.sub_rooms {
-                user_ids.append(&mut Self::get_all_unique_user_ids(&sub_rooms));
+                user_ids.append(&mut Self::get_all_unique_user_ids(sub_rooms));
             }
         }
         user_ids.sort();
@@ -647,7 +625,7 @@ impl RoomImport {
                 }
             }
             if let Some(sub_rooms) = &room.sub_rooms {
-                group_ids.append(&mut Self::get_all_unique_group_ids(&sub_rooms));
+                group_ids.append(&mut Self::get_all_unique_group_ids(sub_rooms));
             }
         }
         group_ids.sort();
@@ -670,7 +648,7 @@ impl RoomImport {
             let res = dracoon.groups.get_group(group_id).await;
             match res {
                 Ok(_) => {}
-                Err(e) => {
+                Err(_) => {
                     return Err(DcCmdError::GroupNotFound(format!(
                         "Group with ID '{}' does not exist.",
                         group_id
@@ -687,7 +665,7 @@ impl RoomImport {
             let res = dracoon.users.get_user(user, None).await;
             match res {
                 Ok(_) => {}
-                Err(e) => {
+                Err(_) => {
                     return Err(DcCmdError::UserDoesNotExist(format!(
                         "User with ID '{}' does not exist.",
                         user
@@ -723,13 +701,10 @@ impl RoomImport {
     ) -> Result<Vec<Room>, DcCmdError> {
         let tokens = Self::get_template_tokens(&template_content, term.clone())?;
         let rooms_map = Self::read_file_and_construct_room_map(template_filler_path, tokens)?;
-        Ok(Self::fill_template_with_data(rooms_map, template_content)?)
+        Self::fill_template_with_data(rooms_map, template_content)
     }
 
-    fn get_template_tokens(
-        template_content: &String,
-        term: Term,
-    ) -> Result<Vec<String>, DcCmdError> {
+    fn get_template_tokens(template_content: &str, term: Term) -> Result<Vec<String>, DcCmdError> {
         // write a regex to find all template tokens (characters within {{ and }}) in the template_content
         // if no tokens are found, return an error
         // if tokens are found, return the tokens
@@ -750,7 +725,7 @@ impl RoomImport {
         }
 
         // check if there are other tokens then "name", "userPermissions", "groupPermissions" and throw an error if there are
-        let allowed_tokens = vec!["name", "userPermissions", "groupPermissions"];
+        let allowed_tokens = ["name", "userPermissions", "groupPermissions"];
         let invalid_tokens: Vec<String> = tokens
             .iter()
             .filter(|token| !allowed_tokens.contains(&token.as_str()))
@@ -814,7 +789,7 @@ impl RoomImport {
             let new_group_member_acceptance: Option<GroupMemberAcceptance> = header_indexes
                 .new_group_member_acceptance_index
                 .and_then(|idx| record.get(idx))
-                .and_then(|s| Self::parse_group_member_acceptance(s));
+                .and_then(Self::parse_group_member_acceptance);
             let group_permissions: Option<NodePermissions> = header_indexes
                 .group_permissions_index
                 .and_then(|idx| record.get(idx))
@@ -911,26 +886,24 @@ impl RoomImport {
         header_indexes: &HeaderIndexes,
         tokens: Vec<String>,
     ) -> Result<(), DcCmdError> {
-        if tokens.iter().any(|token| token == "userPermission") {
-            if header_indexes.user_id_index.is_none()
-                || header_indexes.user_permissions_index.is_none()
-            {
-                error!("'userPermissions' token found but no 'userId' or 'userPermissions' column found in CSV file.");
-                return Err(DcCmdError::CsvReadHeaders(
-                    "'userPermissions' token found but no 'userId' or 'userPermissions' column found in CSV file.".to_string(),
-                ));
-            }
+        if tokens.iter().any(|token| token == "userPermission")
+            && (header_indexes.user_id_index.is_none()
+                || header_indexes.user_permissions_index.is_none())
+        {
+            error!("'userPermissions' token found but no 'userId' or 'userPermissions' column found in CSV file.");
+            return Err(DcCmdError::TemplateTokenConflict(
+                "'userPermissions' token found but no 'userId' or 'userPermissions' column found in CSV file.".to_string(),
+            ));
         }
 
-        if tokens.iter().any(|token| token == "groupPermissions") {
-            if header_indexes.group_id_index.is_none()
-                || header_indexes.group_permissions_index.is_none()
-            {
-                error!("'groupPermissions' token found in template but no 'groupId' or 'groupPermissions' column found in CSV file.");
-                return Err(DcCmdError::CsvReadHeaders(
-                    "'groupPermissions' token found in template but no 'groupId' or 'groupPermissions' column found in CSV file.".to_string(),
-                ));
-            }
+        if tokens.iter().any(|token| token == "groupPermissions")
+            && (header_indexes.group_id_index.is_none()
+                || header_indexes.group_permissions_index.is_none())
+        {
+            error!("'groupPermissions' token found in template but no 'groupId' or 'groupPermissions' column found in CSV file.");
+            return Err(DcCmdError::TemplateTokenConflict(
+           "'groupPermissions' token found in template but no 'groupId' or 'groupPermissions' column found in CSV file.".to_string(),
+            ));
         }
 
         Ok(())
@@ -989,7 +962,7 @@ impl RoomImport {
                 );
             }
             // Deserialize the JSON string to a Room struct
-            let filled_room: Room = serde_json::from_str(&template_content.as_str()).map_err(|e| {
+            let filled_room: Room = serde_json::from_str(template_content.as_str()).map_err(|e| {
                 eprintln!("Failed to parse JSON: {}. Check if JSON template is an object and not an array.", e);
                 e
             }).map_err(|e| {

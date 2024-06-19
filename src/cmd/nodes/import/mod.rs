@@ -19,7 +19,7 @@ use dco3::{
 };
 
 use models::{
-    GroupRoomPermission, Room, RoomId, RoomImport, RoomPolicies, UpdateTask, UpdateTaskType,
+    GroupRoomPermission, Room, RoomId, RoomImport, RoomPolicies, UpdateRoomTaskType, UpdateTask,
     UpdateTasksChannel, UserRoomPermission,
 };
 
@@ -61,7 +61,7 @@ pub async fn import_and_create_room_structure(
         current_user_acc.clone(),
         update_room_tasks_channel.get_sender(),
     )
-    .await;
+    .await?;
 
     update_room_tasks_channel
         .collect_than_complete(term.clone(), &dracoon)
@@ -78,6 +78,8 @@ pub async fn import_and_create_room_structure(
 
     Ok(())
 }
+
+#[allow(clippy::too_many_arguments)]
 async fn process_rooms_wrapper(
     term: Term,
     dracoon: Dracoon<Connected>,
@@ -87,7 +89,7 @@ async fn process_rooms_wrapper(
     path: String,
     current_user_acc: UserAccount,
     sender: mpsc::Sender<UpdateTask>,
-) -> Arc<RwLock<HashMap<RoomId, Option<NodePermissions>>>> {
+) -> Result<Arc<RwLock<HashMap<RoomId, Option<NodePermissions>>>>, DcCmdError> {
     // if the user hasn't been given admin permissions in a room, we need to temporarily give it admin permissions and revoke them later or update the permissions of the user
     let rooms_to_adjust_permissions: Arc<RwLock<HashMap<RoomId, Option<NodePermissions>>>> =
         Arc::new(RwLock::new(HashMap::new()));
@@ -104,10 +106,10 @@ async fn process_rooms_wrapper(
             .progress_chars("=>-"),
     );
     progress_bar.set_length(total_room_count);
-    let message = format!("Creating room structure");
-    progress_bar.set_message(message.clone());
+    progress_bar.set_message("Creating room structure".to_string());
 
-    let res = process_rooms(
+    #[allow(clippy::too_many_arguments)]
+    process_rooms(
         term.clone(),
         dracoon.clone(),
         parent_id,
@@ -118,22 +120,22 @@ async fn process_rooms_wrapper(
         sender,
         progress_bar.clone(),
     )
-    .await;
+    .await?;
 
     progress_bar.finish_with_message(format!(
         "Created {total_room_count} rooms successfully. Adjusting permissions and policies now"
     ));
 
-    rooms_to_adjust_permissions
+    Ok(rooms_to_adjust_permissions)
 }
 
 async fn validate_node_path_and_get_parent_id(
-    source: &String,
+    source: &str,
     dracoon: &Dracoon<Connected>,
     term: &Term,
     current_user_acc: UserAccount,
 ) -> Result<(Option<u64>, String), DcCmdError> {
-    let (parent_path, node_name, _) = parse_path(&source, dracoon.get_base_url().as_ref())?;
+    let (parent_path, node_name, _) = parse_path(source, dracoon.get_base_url().as_ref())?;
     let mut parent_id = None;
     let path = format!("{}{}", &parent_path, &node_name);
 
@@ -143,23 +145,17 @@ async fn validate_node_path_and_get_parent_id(
             .nodes
             .get_node_from_path(&path)
             .await?
-            .ok_or(DcCmdError::InvalidPathOrNoPermission(source.clone()))?;
+            .ok_or(DcCmdError::InvalidPathOrNoPermission(source.to_owned()))?;
 
         if parent_node.node_type != NodeType::Room {
-            return Err(DcCmdError::InvalidPath(source.clone()));
+            return Err(DcCmdError::InvalidPath(source.to_owned()));
         }
 
         parent_id = Some(parent_node.id);
         Ok((parent_id, path))
     } else {
-        check_user_permissions_on_parent(
-            &dracoon,
-            &term,
-            parent_id,
-            &path,
-            current_user_acc.clone(),
-        )
-        .await?;
+        check_user_permissions_on_parent(dracoon, term, parent_id, &path, current_user_acc.clone())
+            .await?;
         Ok((parent_id, path))
     }
 }
@@ -243,6 +239,7 @@ async fn check_user_permissions_on_parent(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 #[async_recursion]
 async fn process_rooms(
     term: Term,
@@ -270,11 +267,11 @@ async fn process_rooms(
             let created_room = process_room(
                 term.clone(),
                 dracoon.clone(),
-                parent_id.clone(),
+                parent_id,
                 room.clone(),
                 path.clone(),
                 rooms_to_adjust_permissions,
-                current_user_id.clone(),
+                current_user_id,
                 room_update_tasks_sender.clone(),
                 progress_bar.clone(),
             )
@@ -309,6 +306,7 @@ async fn process_rooms(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn process_room(
     term: Term,
     dracoon: Dracoon<Connected>,
@@ -321,7 +319,6 @@ async fn process_room(
     progress_bar: ProgressBar,
 ) -> Result<Node, DcCmdError> {
     let created_room = create_room(
-        term.clone(),
         dracoon.clone(),
         parent_id,
         &mut room,
@@ -331,7 +328,7 @@ async fn process_room(
     )
     .await?;
 
-    let created_room_id = created_room.id.clone();
+    let created_room_id = created_room.id;
 
     update_room_groups(
         term.clone(),
@@ -343,7 +340,7 @@ async fn process_room(
 
     update_room_users(
         term.clone(),
-        created_room_id.clone(),
+        created_room_id,
         room.user_permissions.clone(),
         rooms_to_adjust_permissions.clone(),
         current_user_id,
@@ -353,7 +350,7 @@ async fn process_room(
 
     update_room_policies(
         term.clone(),
-        created_room_id.clone(),
+        created_room_id,
         room.policies.clone(),
         room_update_tasks_sender.clone(),
     )
@@ -393,7 +390,7 @@ async fn adjust_temp_admin_permissions(
             .progress_chars("=>-"),
     );
     progress_bar.set_length(total_size as u64);
-    let message = format!("Adjusting permissions of script user in rooms");
+    let message = "Adjusting permissions of script user in rooms".to_string();
     progress_bar.set_message(message.clone());
     static MAX_CONCURRENT: usize = 2;
 
@@ -413,7 +410,7 @@ async fn adjust_temp_admin_permissions(
             let task = async move {
                 let res = dracoon
                     .nodes
-                    .update_room_users(room_id.0.clone(), vec![user_update].into())
+                    .update_room_users(room_id.0, vec![user_update].into())
                     .await;
                 // to do handle error
                 progress_bar_clone.inc(1);
@@ -492,7 +489,6 @@ async fn adjust_temp_admin_permissions(
 }
 
 async fn create_room(
-    term: Term,
     dracoon: Dracoon<Connected>,
     parent_id: Option<u64>,
     room: &mut Room,
@@ -504,7 +500,7 @@ async fn create_room(
     let mut permissions_to_adjust: Option<NodePermissions> = None;
 
     if room.admin_ids.is_none() || !room.admin_ids.clone().unwrap().contains(&current_user_id) {
-        let mut admin_ids = room.admin_ids.clone().unwrap_or(vec![]);
+        let mut admin_ids = room.admin_ids.clone().unwrap_or_default();
         admin_ids.push(current_user_id);
         admin_ids = admin_ids.into_iter().unique().collect();
         room.admin_ids = Some(admin_ids);
@@ -604,7 +600,7 @@ async fn update_room_users(
 
         let res = room_update_tasks_sender
             .send(UpdateTask {
-                task_type: UpdateTaskType::RoomUser(RoomId(room_id), user_updates),
+                task_type: UpdateRoomTaskType::User(RoomId(room_id), user_updates),
             })
             .await;
 
@@ -650,7 +646,7 @@ async fn update_room_groups(
 
         let res = room_update_tasks_sender
             .send(UpdateTask {
-                task_type: UpdateTaskType::RoomGroup(RoomId(room_id), group_updates),
+                task_type: UpdateRoomTaskType::Group(RoomId(room_id), group_updates),
             })
             .await;
 
@@ -697,7 +693,7 @@ async fn update_room_policies(
 
         let res = room_update_tasks_sender
             .send(UpdateTask {
-                task_type: UpdateTaskType::RoomPolicies(RoomId(room_id), new_policies),
+                task_type: UpdateRoomTaskType::Policies(RoomId(room_id), new_policies),
             })
             .await;
 
@@ -748,7 +744,7 @@ mod tests {
         .unwrap();
         assert_eq!(res, ());
 
-        room_update_task_channel.collect_tasks(term).await;
+        room_update_task_channel.collect_tasks().await;
 
         assert_eq!(room_update_task_channel.get_policy_task_count(), 1);
     }

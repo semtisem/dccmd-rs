@@ -240,7 +240,6 @@ fn get_error_message(err: &DcCmdError) -> String {
         DcCmdError::CsvReadHeaders(msg) => msg.to_string(),
         DcCmdError::CsvReadRecord(msg) => msg.to_string(),
         DcCmdError::SerdeSerializeToString(msg) => msg.to_string(),
-        DcCmdError::SerdeDeserializeFromString(msg) => msg.to_string(),
         DcCmdError::NoTemplateTokensFound(msg) => msg.to_string(),
         DcCmdError::TemplateTokenConflict(msg) => msg.to_string(),
         DcCmdError::InvalidTemplateTokens(msg) => msg.to_string(),

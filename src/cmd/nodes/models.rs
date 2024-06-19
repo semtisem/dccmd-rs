@@ -1,7 +1,4 @@
 #![allow(clippy::struct_excessive_bools)]
-use console::Term;
-
-use dco3::{auth::Connected, Dracoon};
 
 use crate::cmd::models::PasswordAuth;
 

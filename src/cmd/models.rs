@@ -69,8 +69,6 @@ pub enum DcCmdError {
     #[error("Failed to serialize to string")]
     SerdeSerializeToString(String),
     #[error("Failed to deserialize from string")]
-    SerdeDeserializeFromString(String),
-    #[error("No template tokens found")]
     NoTemplateTokensFound(String),
     #[error("Template token conflict")]
     TemplateTokenConflict(String),
