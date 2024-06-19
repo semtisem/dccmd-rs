@@ -1,12 +1,15 @@
 # DRACOON Commander RS
 
 ## What is this?
+
 This is a port of [DRACOON Commander](https://github.com/unbekanntes-pferd/dccmd) - initially a Python3 project to use DRACOON via CLI.
-The project serves as a demo client implementation using `dco3` - an API wrapper in Rust for DRACOON. 
+The project serves as a demo client implementation using `dco3` - an API wrapper in Rust for DRACOON.
 
 ### Built with
+
 This project makes use of several awesome crates and uses async Rust throughout the project.
 Crates used:
+
 - [reqwest](https://crates.io/crates/reqwest)
 - [clap](https://crates.io/crates/clap)
 - [console](https://crates.io/crates/console)
@@ -21,7 +24,7 @@ For all DRACOON operations `dco3` is used.
 
 ## Installation
 
-You can download precompiled binaries on the Github releases page: 
+You can download precompiled binaries on the Github releases page:
 [Releases](https://github.com/unbekanntes-pferd/dccmd-rs/releases)
 
 If you have the Rust toolchain installed, you can install this using cargo like so:
@@ -49,10 +52,10 @@ Currently, the following commands are working:
 - `ls` - lists all nodes for a given path in DRACOON
 - `mkdir` - creates a folder in given path in DRACOON
 - `mkroom` - creates a room (inherits permissions) in given path in DRACOON
+- `import-rooms` - imports rooms with settings, policies and permissions from a JSON file. It is possible to template the JSON file from an additional CSV file.
 - `rm` - removes a node by given path in DRACOON
 - `upload` - uploads a file or folder to a parent in DRACOON (encrypted, unencrypted)
 - `users` - user management in DRACOON (see subcommands below)
-
 
 ## Example usage
 
@@ -71,6 +74,7 @@ To download a container (room or folder), use the download command with recursiv
 ```bash
 dccmd-rs download -r your.dracoon.domain/some/room ./your/path
 ```
+
 **Note**: This will create a directory with same name as your container. Sub rooms are **not** included.
 
 To download a list search result, use the download command with a search string:
@@ -108,6 +112,7 @@ To upload a folder, use the `--recursive` flag:
 ```bash
 dccmd-rs upload /your/path your.dracoon.domain/some/room
 ```
+
 **Note:** Currently only absolute paths are supported for recursive uploads.
 
 To upload a file with **no** authorization to a public upload share (file request):
@@ -120,13 +125,15 @@ dccmd-rs upload /your/path your.dracoon.domain/public/upload-shares/someLongAcce
 
 #### Upload options
 
-When uploading, the default resolution strategy is *autorename* - this means that if a file `foo.pdf` uploaded and already present, it is automatically renamed by DRACOON (e.g. to `foo (1).pdf`).
+When uploading, the default resolution strategy is _autorename_ - this means that if a file `foo.pdf` uploaded and already present, it is automatically renamed by DRACOON (e.g. to `foo (1).pdf`).
 
 In order to change this behavior, you can the pass the following flags / options:
-- *--overwrite* - a file with the same name will be overwritten (essentially creating versions of the same file)
-- *--keep-share-links* - if *--overwrite* is used, you can additionally keep existing (download) share links for file(s)
+
+- _--overwrite_ - a file with the same name will be overwritten (essentially creating versions of the same file)
+- _--keep-share-links_ - if _--overwrite_ is used, you can additionally keep existing (download) share links for file(s)
 
 ### Listing nodes
+
 To list nodes, use the `ls` command:
 
 ```bash
@@ -136,15 +143,15 @@ dccmd-rs ls your.dracoon.domain/some/path
 dccmd-rs ls your.dracoon.domain/
 
 // for searches within the room
-dccmd-rs ls your.dracoon.domain/*.pdf 
+dccmd-rs ls your.dracoon.domain/*.pdf
 ```
 
 Options:
- - `-l`, `--long` - prints all details (size, updated by, node id...)           
- - `-r`, `--human-readable` - prints size in human readable format
- -    `--managed` - shows room as room admin / room manager (rooms w/o permissions)       
- -    `--all` - fetches all items (default: first 500 items)
 
+- `-l`, `--long` - prints all details (size, updated by, node id...)
+- `-r`, `--human-readable` - prints size in human readable format
+- `--managed` - shows room as room admin / room manager (rooms w/o permissions)
+- `--all` - fetches all items (default: first 500 items)
 
 ### Deleting nodes
 
@@ -155,9 +162,10 @@ dccmd-rs rm your.dracoon.domain/some/path/some_file.pdf
 dccmd-rs rm -r your.dracoon.domain/some/path/some/room
 dccmd-rs rm -r your.dracoon.domain/*test
 ```
-*Note*: If you intend to delete a container (room or folder), use the recursive flag.
-*Note*: Room deletion always requires additional confirmation.
-*Note*: You can delete the content in a room by using search strings (`*` deletes all). This does **not** include rooms.
+
+_Note_: If you intend to delete a container (room or folder), use the recursive flag.
+_Note_: Room deletion always requires additional confirmation.
+_Note_: You can delete the content in a room by using search strings (`*` deletes all). This does **not** include rooms.
 
 ### Creating folders
 
@@ -174,11 +182,51 @@ dccmd-rs mkroom your.dracoon.domain/some/path/newroom
 # pass optional usernames for admins (example adds admins with usernames foo1, foo2 and foo3)
 dccmd-rs mkroom your.dracoon.domain/some/path/newroom -a foo1 -a foo2 -a foo3
 
-# you can additionally inherit permissions using the --inherit-permissions flag 
+# you can additionally inherit permissions using the --inherit-permissions flag
 dccmd-rs mkroom your.dracoon.domain/some/path/newroom -a foo1 --inherit-permissions
 
 # you can also set the default classification (example sets to confidential)
 dccmd-rs mkroom your.dracoon.domain/some/path/newroom --classification 3
+```
+
+### Importing rooms from JSON
+
+To import rooms from a json file, use `import-rooms`:
+
+You can import a room structure with permissions, settings and policies from a JSON file. See [examples/room-import.example.json](https://github.com/unbekanntes-pferd/dccmd-rs/blob/main/examples/room-import.example.json) for the json model.
+
+- data model is an array of room objects [object, object]
+- 'name' is required
+- at least one admin has to be specified in 'adminIds', 'adminGroupIds', 'userPermission' or 'groupPermissions'
+
+```bash
+dccmd-rs import-rooms your.dracoon.domain/some/target/path/ ./relative/path/to/file.json
+```
+
+### Import rooms from JSON template and populate it using data from a CSV file
+
+You can use a template room from a json file and populate it with data from a csv file. See [examples/room-import.template.example.json](https://github.com/unbekanntes-pferd/dccmd-rs/blob/main/examples/room-import.template.example.json) and [examples/room-import.template.example.csv](https://github.com/unbekanntes-pferd/dccmd-rs/blob/main/examples/room-import.template.example.csv) for examples.
+
+<strong>JSON file:</strong>
+
+- single room object {object}
+- set {{ name }}, {{ userPermissions }} and {{ groupPermissions }} to template fields
+- {{ name }} is required when using a template
+
+<strong>CSV file:</strong>
+
+- columns:
+  - 'name' is required
+  - 'userId' and 'userPermissions' for user permissions
+  - 'groupId', 'groupPermissions' and 'newGroupMemberAcceptance' for group permissions
+  - the order is not relevant
+- create templated rooms side by side in the target room for each unique ‘name’ in the CSV file
+- set multiple userPermissions or groupPermissions per room by having rows with the same room name
+- permissions are specified as "[true,true,true,true,true,true,true,true,true,true]"
+  - corresponding to permissions manage, read, create, change, delete, manage download share, manage upload share, read recycle bin, restore recycle bin, delete recycle bin
+
+```bash
+dccmd-rs import-rooms your.dracoon.domain/some/target/path/ ./relative/path/to/file.json ./relative/path/to/csv/file.csv
 ```
 
 ### Managing users
@@ -206,7 +254,7 @@ dccmd-rs users ls your.dracoon.domain/ --search foo
 To create users, you can use the `users create some.dracoon.domain.com` command:
 
 ```bash
-# params: --first-name, --last-name, --email, --login, --oidc-id 
+# params: --first-name, --last-name, --email, --login, --oidc-id
 dccmd-rs users create your.dracoon.domain/ -f foo -l bar -e foo@bar.com # local user
 dccmd-rs users create your.dracoon.domain/ -f foo -l bar -e foo@bar.com --oidc-id 2 # OIDC user
 ```
@@ -226,7 +274,6 @@ To fetch specific user info, you can use the `users info some.dracoon.domain.com
 dccmd-rs users info your.dracoon.domain/ --user-id 2
 dccmd-rs users info your.dracoon.domain/ --user-name foo # short: -u
 ```
-
 
 ### Managing groups
 
@@ -263,7 +310,7 @@ To list group users, you can use the `groups users ls some.dracoon.domain.com` c
 # get all group users for every group
 dccmd-rs groups users ls your.dracoon.domain/
 
-# list group users in csv format 
+# list group users in csv format
 dccmd-rs groups users ls your.dracoon.domain/ --csv
 dccmd-rs groups users ls your.dracoon.domain/ --csv --all > groupusers.csv
 
@@ -282,7 +329,7 @@ In order to remove a stored token, use the `config auth rm` command.
 # displays user info for stored refresh token
 dccmd-rs config auth ls your.dracoon.domain/
 # removes stored refresh token for given domain
-dccmd-rs config auth rm your.dracoon.domain/ 
+dccmd-rs config auth rm your.dracoon.domain/
 ```
 
 #### Stored crypto secret
@@ -294,7 +341,7 @@ In order to remove a stored token, use the `config crypto rm` command.
 # displays user info for stored crypto secret
 dccmd-rs config crypto ls your.dracoon.domain/
 # removes stored crypto secret for given domain
-dccmd-rs config crypto rm your.dracoon.domain/ 
+dccmd-rs config crypto rm your.dracoon.domain/
 ```
 
 ### CLI mode
@@ -307,9 +354,9 @@ dccmd-rs --username your_username --password your_secure_password ls your.dracoo
 ```
 
 Use this at your own risk and be aware that the password is stored in plain in your shell history.
-*Note*: This only works for the password flow - this means you **must** use a local user. 
+_Note_: This only works for the password flow - this means you **must** use a local user.
 
-This also works for the encryption password like so: 
+This also works for the encryption password like so:
 
 ```bash
 dccmd-rs --username your_username --password your_secure_password --encryption-password your_secure_encryption_password ls your.dracoon.domain/some/path

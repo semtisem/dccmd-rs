@@ -1,0 +1,106 @@
+[
+  {
+    "name": "Main Room",
+    "recycleBinRetentionPeriod": 30,
+    "quota": 1000000000,
+    "inheritPermissions": true,
+    "adminIds": [1],
+    "adminGroupIds": [4],
+    "userPermissions": [
+      {
+        "id": 5,
+        "permissions": {
+          "manage": true,
+          "read": true,
+          "create": true,
+          "change": true,
+          "delete": true,
+          "manageDownloadShare": true,
+          "manageUploadShare": true,
+          "readRecycleBin": true,
+          "restoreRecycleBin": true,
+          "deleteRecycleBin": true
+        }
+      }
+    ],
+    "groupPermissions": [
+      {
+        "id": 6,
+        "newGroupMemberAcceptance": "autoallow",
+        "permissions": {
+          "manage": false,
+          "read": true,
+          "create": true,
+          "change": true,
+          "delete": false,
+          "manageDownloadShare": true,
+          "manageUploadShare": true,
+          "readRecycleBin": false,
+          "restoreRecycleBin": false,
+          "deleteRecycleBin": false
+        }
+      }
+    ],
+    "newGroupMemberAcceptance": "pending",
+    "classification": 2,
+    "policies": {
+      "defaultExpirationPeriod": 365,
+      "isVirusProtectionEnabled": true
+    },
+    "subRooms": [
+      {
+        "name": "Sub Room",
+        "recycleBinRetentionPeriod": 30,
+        "quota": 1000000000,
+        "inheritPermissions": true,
+        "adminIds": [1],
+        "adminGroupIds": [4],
+        "userPermissions": [
+          {
+            "id": 5,
+            "permissions": {
+              "manage": true,
+              "read": true,
+              "create": true,
+              "change": true,
+              "delete": true,
+              "manageDownloadShare": true,
+              "manageUploadShare": true,
+              "readRecycleBin": true,
+              "restoreRecycleBin": true,
+              "deleteRecycleBin": true
+            }
+          }
+        ],
+        "groupPermissions": [
+          {
+            "id": 6,
+            "newGroupMemberAcceptance": "autoallow",
+            "permissions": {
+              "manage": false,
+              "read": true,
+              "create": true,
+              "change": true,
+              "delete": false,
+              "manageDownloadShare": true,
+              "manageUploadShare": true,
+              "readRecycleBin": false,
+              "restoreRecycleBin": false,
+              "deleteRecycleBin": false
+            }
+          }
+        ],
+        "newGroupMemberAcceptance": "pending",
+        "classification": 2,
+        "policies": {
+          "defaultExpirationPeriod": 365,
+          "isVirusProtectionEnabled": true
+        }
+      }
+    ]
+  },
+  {
+    "name": "Sibling",
+    "adminIds": [5]
+  }
+]
