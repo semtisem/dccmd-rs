@@ -214,6 +214,9 @@ fn get_error_message(err: &DcCmdError) -> String {
     match err {
         DcCmdError::InvalidUrl(url) => format!("Invalid URL: {url}"),
         DcCmdError::InvalidPath(path) => format!("Invalid path: {path}"),
+        DcCmdError::InvalidPathOrNoPermission(path) => {
+            format!("Invalid path or no permission at: {path}")
+        }
         DcCmdError::IoError => "Error reading / writing content.".into(),
         DcCmdError::DracoonError(e) => format!("{e}"),
         DcCmdError::ConnectionFailed => "Connection failed.".into(),
@@ -225,6 +228,22 @@ fn get_error_message(err: &DcCmdError) -> String {
         DcCmdError::DracoonAuthError(e) => format!("{e}"),
         DcCmdError::InvalidArgument(msg) => msg.to_string(),
         DcCmdError::LogFileCreationFailed => "Log file creation failed.".into(),
+        DcCmdError::InsufficentPermissions(path) => {
+            format!("Insufficent permissions to perform action at path: {path}")
+        }
+        DcCmdError::ImportedRoomHasNoAdmin(msg) => msg.to_string(),
+        DcCmdError::IllegalRoomName(msg) => msg.to_string(),
+        DcCmdError::ConflictingRoomPermissions(msg) => msg.to_string(),
+        DcCmdError::UserDoesNotExist(msg) => msg.to_string(),
+        DcCmdError::GroupNotFound(msg) => msg.to_string(),
+        DcCmdError::JsonParseTemplate(msg) => msg.to_string(),
+        DcCmdError::CsvReadHeaders(msg) => msg.to_string(),
+        DcCmdError::CsvReadRecord(msg) => msg.to_string(),
+        DcCmdError::SerdeSerializeToString(msg) => msg.to_string(),
+        DcCmdError::SerdeDeserializeFromString(msg) => msg.to_string(),
+        DcCmdError::NoTemplateTokensFound(msg) => msg.to_string(),
+        DcCmdError::TemplateTokenConflict(msg) => msg.to_string(),
+        DcCmdError::InvalidTemplateTokens(msg) => msg.to_string(),
     }
 }
 

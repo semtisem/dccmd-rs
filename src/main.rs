@@ -12,6 +12,7 @@ use cmd::{
         download::download,
         list_nodes,
         models::{CmdDownloadOptions, CmdMkRoomOptions, CmdUploadOptions},
+        import::import_and_create_room_structure
         upload::upload,
     },
     print_version,
@@ -130,6 +131,20 @@ async fn main() {
                     password_auth,
                     admin_users,
                 ),
+            )
+            .await
+        }
+        DcCmdCommand::ImportRooms {
+            source,
+            json_path,
+            template_filler_path,
+        } => {
+            import_and_create_room_structure(
+                term,
+                source,
+                json_path,
+                template_filler_path,
+                password_auth,
             )
             .await
         }

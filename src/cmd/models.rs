@@ -28,6 +28,8 @@ pub enum DcCmdError {
     InvalidUrl(String),
     #[error("Invalid DRACOON path")]
     InvalidPath(String),
+    #[error("Invalid DRACOON path or no permission")]
+    InvalidPathOrNoPermission(String),
     #[error("Saving DRACOON credentials failed")]
     CredentialStorageFailed,
     #[error("Deleting DRACOON credentials failed")]
@@ -46,6 +48,34 @@ pub enum DcCmdError {
     InvalidArgument(String),
     #[error("Log file creation failed")]
     LogFileCreationFailed,
+    #[error("Insufficent permission to perform action")]
+    InsufficentPermissions(String),
+    #[error("Room does not have an admin")]
+    ImportedRoomHasNoAdmin(String),
+    #[error("Room name contains illegal character")]
+    IllegalRoomName(String),
+    #[error("Room has conflicting permissions")]
+    ConflictingRoomPermissions(String),
+    #[error("User does not exist")]
+    UserDoesNotExist(String),
+    #[error("Group does not exist")]
+    GroupNotFound(String),
+    #[error("Parsing JSON template failed")]
+    JsonParseTemplate(String),
+    #[error("Failed to read csv headers")]
+    CsvReadHeaders(String),
+    #[error("Failed to read csv record")]
+    CsvReadRecord(String),
+    #[error("Failed to serialize to string")]
+    SerdeSerializeToString(String),
+    #[error("Failed to deserialize from string")]
+    SerdeDeserializeFromString(String),
+    #[error("No template tokens found")]
+    NoTemplateTokensFound(String),
+    #[error("Template token conflict")]
+    TemplateTokenConflict(String),
+    #[error("Invalid template tokens")]
+    InvalidTemplateTokens(String),
 }
 
 impl From<DracoonClientError> for DcCmdError {
@@ -215,6 +245,15 @@ pub enum DcCmdCommand {
         inherit_permissions: bool,
     },
 
+    /// Import and create room structure in DRACOON
+    ImportRooms {
+        /// Source file path
+        source: String,
+        /// Path to create room structure
+        json_path: String,
+        /// Template filler path
+        template_filler_path: Option<String>,
+    },
     /// Delete a node in DRACOON
     Rm {
         /// Source file path in DRACOON
