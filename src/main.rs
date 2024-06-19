@@ -10,9 +10,9 @@ use cmd::{
     nodes::{
         create_folder, create_room, delete_node,
         download::download,
+        import::import_and_create_room_structure,
         list_nodes,
         models::{CmdDownloadOptions, CmdMkRoomOptions, CmdUploadOptions},
-        import::import_and_create_room_structure
         upload::upload,
     },
     print_version,
