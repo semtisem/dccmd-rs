@@ -45,17 +45,64 @@ pub struct RoomPolicies {
 #[serde(rename_all = "camelCase", deny_unknown_fields)] // This will make the compiler error if there are unknown fields in the JSON which could be typos and thus result in None values
 pub struct Room {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complete_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub recycle_bin_retention_period: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub quota: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub inherit_permissions: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub admin_ids: Option<Vec<u64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub admin_group_ids: Option<Vec<u64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub user_permissions: Option<Vec<UserRoomPermission>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub group_permissions: Option<Vec<GroupRoomPermission>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub new_group_member_acceptance: Option<GroupMemberAcceptance>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub classification: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub policies: Option<RoomPolicies>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sub_rooms: Option<Vec<Room>>,
+}
+
+impl From<dco3::nodes::Node> for Room {
+    fn from(node: dco3::nodes::Node) -> Self {
+        let recycle_bin_retention_period = match node.recycle_bin_retention_period {
+            Some(period) => Some(period as u32),
+            None => None,
+        };
+
+        let classification = match node.classification {
+            Some(classification_id) => Some(classification_id as u8),
+            None => None,
+        };
+
+        Room {
+            name: node.name.clone(),
+            complete_path: Some(format!(
+                "{}{}",
+                node.parent_path.unwrap_or("/".to_string()),
+                node.name
+            )),
+            recycle_bin_retention_period,
+            quota: node.quota,
+            inherit_permissions: node.inherit_permissions,
+            admin_ids: None,
+            admin_group_ids: None,
+            user_permissions: None,
+            group_permissions: None,
+            new_group_member_acceptance: None,
+            classification,
+            policies: None,
+            sub_rooms: None,
+        }
+    }
 }
 
 struct HeaderIndexes {
