@@ -10,6 +10,7 @@ use cmd::{
     nodes::{
         create_folder, create_room, delete_node,
         download::download,
+        export::export_room_structure,
         import::import_and_create_room_structure,
         list_nodes,
         models::{CmdDownloadOptions, CmdMkRoomOptions, CmdUploadOptions},
@@ -147,6 +148,9 @@ async fn main() {
                 password_auth,
             )
             .await
+        }
+        DcCmdCommand::ExportRooms { source, target } => {
+            export_room_structure(term, source, target, password_auth).await
         }
         DcCmdCommand::Rm { source, recursive } => {
             delete_node(term, source, Some(recursive), password_auth).await

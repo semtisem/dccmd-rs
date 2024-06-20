@@ -252,6 +252,13 @@ pub enum DcCmdCommand {
         /// Template filler path
         template_filler_path: Option<String>,
     },
+
+    ExportRooms {
+        // Source file path in DRACOON
+        source: String,
+        // Target file path of JSON export
+        target: String,
+    },
     /// Delete a node in DRACOON
     Rm {
         /// Source file path in DRACOON

@@ -548,7 +548,9 @@ async fn create_room(
     }
 
     if let Some(admin_group_ids) = &room.admin_group_ids {
-        req = req.with_admin_group_ids(admin_group_ids.clone());
+        if admin_group_ids.len() > 0 {
+            req = req.with_admin_group_ids(admin_group_ids.clone());
+        }
     }
 
     let req = req.build();
