@@ -1,0 +1,6 @@
+name,userId,userPermissions,groupId,newGroupMemberAcceptance,groupPermissions
+test,2,"[true, false, false, false, false, false, false, false, false, false]",4,autoallow,"[true, false, false, false, false, false, false, false, false, false]"
+test,32,"[true, false, false, false, false, false, false, false, false, false]",6,pending,"[true, false, false, false, false, false, false, false, false, false]"
+test_2,2,"[true, false, false, false, false, false, false, false, false, false]",4,autoallow,"[true, false, false, false, false, false, false, false, false, false]"
+test_3,2,"[true, false, false, false, false, false, false, false, false, false]",4,autoallow,"[true, false, false, false, false, false, false, false, false, false]"
+test_3,32,"[false, true, true, true, false, false, false, false, false, false]",4,pending,"[true, false, false, false, false, false, false, false, false, false]"

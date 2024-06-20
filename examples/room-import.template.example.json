@@ -1,0 +1,15 @@
+{
+  "name": "{{ name }}",
+  "recycleBinRetentionPeriod": 30,
+  "quota": 1000000000,
+  "inheritPermissions": true,
+  "adminIds": [1],
+  "userPermissions": "{{ userPermissions }}",
+  "groupPermissions": "{{ groupPermissions }}",
+  "subRooms": [
+    {
+      "name": "sub_room",
+      "adminIds": [1]
+    }
+  ]
+}

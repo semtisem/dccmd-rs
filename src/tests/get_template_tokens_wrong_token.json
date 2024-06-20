@@ -1,0 +1,12 @@
+{
+  "name": "{{ namee }}",
+  "adminIds": [2],
+  "userPermissions": "{{ userPermissions }}",
+  "groupPermissions": "{{ groupPermissions }}",
+  "subRooms": [
+    {
+      "name": "sub",
+      "adminIds": [2]
+    }
+  ]
+}
